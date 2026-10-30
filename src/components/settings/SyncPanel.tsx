@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Check, Cloud, CloudOff, RefreshCw } from "lucide-react";
 import { onLocalChange, syncNow, useSyncStore } from "@/lib/sync/web";
-import { LAN_PORT, lanInfo, lanSetup } from "@/lib/sync/core";
+import { LAN_PORT, lanInfo } from "@/lib/sync/core";
 import { Button } from "@/components/ui/Button";
 import { Badge, Card, Input, Label } from "@/components/ui/primitives";
 
@@ -108,7 +108,6 @@ export function SyncPanel() {
     setBusy(true);
     setError(null);
     try {
-      if (lan && !lan.hasPassword) await lanSetup(window.location.origin, lanPassword);
       await connect(
         { url: window.location.origin, key: lanPassword, email: "", device: form.device.trim() || "الكمبيوتر", mode: "lan" },
         ""
@@ -210,10 +209,21 @@ export function SyncPanel() {
               </p>
               {lan === null ? (
                 <p className="text-small text-ink-3">جارٍ فحص خدمة المزامنة على الكمبيوتر…</p>
+              ) : !lan.hasPassword ? (
+                // Chosen in a terminal on this PC: over HTTP any device on the Wi-Fi could choose it first.
+                <div className="rounded-xl bg-accent-soft px-4 py-3 space-y-1.5">
+                  <p className="text-ui text-accent-strong font-medium">اختر كلمة المزامنة أولاً من هذا الكمبيوتر</p>
+                  <p className="text-small text-ink-2">
+                    افتح موجه الأوامر في مجلد التطبيق وشغّل: <code dir="ltr" className="font-mono">npm run sync-password</code> ثم ارجع هنا واضغط «أعد الفحص».
+                  </p>
+                  <button type="button" className="text-small text-brand underline" onClick={() => lanInfo(window.location.origin).then(setLan, () => setLan(null))}>
+                    أعد الفحص
+                  </button>
+                </div>
               ) : (
                 <div>
-                  <Label htmlFor="lan-pass" hint={lan.hasPassword ? "التي اخترتها سابقاً" : "اخترها الآن، 6 أحرف على الأقل. ستكتبها في الهاتف أيضاً"}>
-                    {lan.hasPassword ? "كلمة المزامنة" : "اختر كلمة مزامنة"}
+                  <Label htmlFor="lan-pass" hint="التي اخترتها بالأمر npm run sync-password">
+                    كلمة المزامنة
                   </Label>
                   <Input id="lan-pass" dir="ltr" type="password" autoComplete="off" value={lanPassword} onChange={(e) => setLanPassword(e.target.value)} required minLength={6} />
                 </div>
@@ -223,7 +233,7 @@ export function SyncPanel() {
                 <Input id="lan-device" value={form.device} onChange={(e) => setForm({ ...form, device: e.target.value })} />
               </div>
               {error && <p className="rounded-xl bg-danger-soft text-danger px-4 py-2.5 text-ui">{error}</p>}
-              <Button type="submit" disabled={busy || lan === null}>
+              <Button type="submit" disabled={busy || !lan?.hasPassword}>
                 <Check className="w-4 h-4" />
                 {busy ? "جارٍ الربط…" : "ربط وبدء المزامنة"}
               </Button>

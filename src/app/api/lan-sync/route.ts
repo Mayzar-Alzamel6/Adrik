@@ -13,7 +13,7 @@ async function run(req: NextRequest) {
       return NextResponse.json({ error: "bad body" }, { status: 400 });
     }
   }
-  const res = handleLan({ method: req.method, key: req.headers.get("x-sync-key"), host: req.headers.get("host"), body });
+  const res = handleLan({ method: req.method, key: req.headers.get("x-sync-key"), body });
   return NextResponse.json(res.body, { status: res.status, headers: { "Cache-Control": "no-store" } });
 }
 

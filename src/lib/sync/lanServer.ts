@@ -2,16 +2,18 @@
  * The computer's side of Wi-Fi sync: the same one-row-per-slot table as Supabase, kept in a JSON file on this PC.
  * Pure Node (no Next imports) so tests can run it. The route in app/api/lan-sync only adapts requests to `handleLan`.
  *
- * Every call except `info` and the first `setup` needs the sync password in `x-sync-key`.
- * Only a salted hash of it is stored. Wrong passwords lock the endpoint for a minute after five misses.
+ * Every call except `info` needs the sync password in `x-sync-key`. The password is chosen only on this
+ * computer with `npm run sync-password` (never over the network: a request's Host header proves nothing).
+ * Only a salted scrypt hash of it is stored. Wrong passwords lock the endpoint for a minute after five misses.
  */
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, copyFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import path from "node:path";
 
 const SLOTS = ["main", "vault", "planner", "projects"];
 export const MIN_PASSWORD = 6;
+const SET_ON_PC = "عيّنها على الكمبيوتر: شغّل npm run sync-password في مجلد التطبيق.";
 
 interface Row {
   slot: string;
@@ -20,16 +22,21 @@ interface Row {
   device?: string;
 }
 
+interface Auth {
+  salt: string;
+  hash: string;
+  /** Absent on hashes saved before scrypt (single sha256); upgraded on the next correct password. */
+  kdf?: "scrypt";
+}
+
 interface Db {
-  auth: { salt: string; hash: string } | null;
+  auth: Auth | null;
   rows: Record<string, Row>;
 }
 
 export interface LanRequest {
   method: string;
   key: string | null;
-  /** The Host header, used to accept first-time setup only from this computer. */
-  host: string | null;
   body: unknown;
 }
 
@@ -60,13 +67,28 @@ function save(db: Db) {
   renameSync(tmp, f);
 }
 
-const hash = (salt: string, password: string) => createHash("sha256").update(`${salt}:${password}`).digest("hex");
+const legacyHash = (salt: string, password: string) => createHash("sha256").update(`${salt}:${password}`).digest("hex");
+const scryptHash = (salt: string, password: string) => scryptSync(password, salt, 32).toString("hex");
 
-function passwordOk(db: Db, key: string | null): boolean {
-  if (!db.auth || !key) return false;
-  const a = Buffer.from(hash(db.auth.salt, key));
-  const b = Buffer.from(db.auth.hash);
+function newAuth(password: string): Auth {
+  const salt = randomBytes(16).toString("hex");
+  return { salt, hash: scryptHash(salt, password), kdf: "scrypt" };
+}
+
+function passwordOk(auth: Auth | null, key: string | null): boolean {
+  if (!auth || !key) return false;
+  const a = Buffer.from(auth.kdf === "scrypt" ? scryptHash(auth.salt, key) : legacyHash(auth.salt, key));
+  const b = Buffer.from(auth.hash);
   return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/** Chooses or replaces the sync password. Run on this computer only, by `scripts/sync-password.mjs`. */
+export function setLanPassword(password: string): { ok: true } | { ok: false; error: string } {
+  if (password.length < MIN_PASSWORD) return { ok: false, error: `كلمة المزامنة ${MIN_PASSWORD} أحرف على الأقل.` };
+  const db = load();
+  db.auth = newAuth(password);
+  save(db);
+  return { ok: true };
 }
 
 let misses = 0;
@@ -87,8 +109,6 @@ export function lanAddresses(): string[] {
   return out;
 }
 
-const isLocalHost = (host: string | null) => /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(host ?? "");
-
 export function handleLan(req: LanRequest): LanResponse {
   const db = load();
   const body = (req.body ?? {}) as Record<string, unknown>;
@@ -97,21 +117,14 @@ export function handleLan(req: LanRequest): LanResponse {
     return { status: 200, body: { hasPassword: Boolean(db.auth), addresses: lanAddresses() } };
   }
 
+  // Any device on the Wi-Fi can reach this endpoint and fake its Host header, so the password is never set over HTTP.
   if (req.method === "POST" && body.action === "setup") {
-    if (db.auth) return { status: 409, body: { error: "كلمة المزامنة موجودة مسبقاً." } };
-    // The first password can only be chosen from this computer, not from another device on the network.
-    if (!isLocalHost(req.host)) return { status: 403, body: { error: "اختر كلمة المزامنة من الكمبيوتر نفسه." } };
-    const password = String(body.password ?? "");
-    if (password.length < MIN_PASSWORD) return { status: 400, body: { error: `كلمة المزامنة ${MIN_PASSWORD} أحرف على الأقل.` } };
-    const salt = randomBytes(16).toString("hex");
-    db.auth = { salt, hash: hash(salt, password) };
-    save(db);
-    return { status: 200, body: { ok: true } };
+    return { status: 403, body: { error: SET_ON_PC } };
   }
 
-  if (!db.auth) return { status: 401, body: { error: "لم تُعيَّن كلمة المزامنة بعد. افتح الإعدادات على الكمبيوتر أولاً." } };
+  if (!db.auth) return { status: 401, body: { error: `لم تُعيَّن كلمة المزامنة بعد. ${SET_ON_PC}` } };
   if (Date.now() < lockedUntil) return { status: 429, body: { error: "محاولات كثيرة خاطئة. حاول بعد دقيقة." } };
-  if (!passwordOk(db, req.key)) {
+  if (!passwordOk(db.auth, req.key)) {
     if (++misses >= 5) {
       misses = 0;
       lockedUntil = Date.now() + 60_000;
@@ -119,6 +132,10 @@ export function handleLan(req: LanRequest): LanResponse {
     return { status: 401, body: { error: "كلمة المزامنة غير صحيحة." } };
   }
   misses = 0;
+  if (db.auth.kdf !== "scrypt") {
+    db.auth = newAuth(req.key!);
+    save(db);
+  }
 
   if (req.method === "GET") return { status: 200, body: Object.values(db.rows).map(({ slot, data, updated_at }) => ({ slot, data, updated_at })) };
 
