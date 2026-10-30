@@ -121,8 +121,14 @@ export function CompletionPanel() {
                 <Txt variant="caption" color="ink3">
                   سرعة الرافعة العالية (High-Leverage Velocity)
                 </Txt>
-                <Txt variant="title" weight="bold" style={{ marginTop: 2 }}>
+                <Txt
+                  variant="title"
+                  weight="bold"
+                  color={auditMetrics.highLeverageRate === null ? "ink" : auditMetrics.highLeverageRate >= 70 ? "brand" : "danger"}
+                  style={{ marginTop: 2 }}
+                >
                   {auditMetrics.highLeverageRate !== null ? `${auditMetrics.highLeverageRate}%` : "—"}
+                  <Txt variant="caption" color="ink3"> · الهدف ≥ 70%</Txt>
                 </Txt>
                 <Txt variant="caption" color="ink2" style={{ marginTop: 2 }}>
                   {auditMetrics.highLeverageDone} من {auditMetrics.highLeverageTotal} مهام رافعة استراتيجية
@@ -181,8 +187,14 @@ export function CompletionPanel() {
                 <Txt variant="caption" color="ink3">
                   بوابة الجودة وإتقان الـ DoD
                 </Txt>
-                <Txt variant="title" weight="bold" style={{ marginTop: 2 }}>
+                <Txt
+                  variant="title"
+                  weight="bold"
+                  color={auditMetrics.qualityPassRate === null ? "ink" : auditMetrics.qualityPassRate >= 80 ? "brand" : "danger"}
+                  style={{ marginTop: 2 }}
+                >
                   {auditMetrics.qualityPassRate !== null ? `${auditMetrics.qualityPassRate}%` : "—"}
+                  <Txt variant="caption" color="ink3"> · الهدف ≥ 80%</Txt>
                 </Txt>
                 <Txt variant="caption" color="ink2" style={{ marginTop: 2 }}>
                   {auditMetrics.qualityPassedDays} من {auditMetrics.qualityAuditedDays} أيام استوفت معيار الإتقان

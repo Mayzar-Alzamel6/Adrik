@@ -6,6 +6,7 @@ import { useProjectsStore } from "@/stores/useProjectsStore";
 import { useVaultStore } from "@/stores/useVaultStore";
 import { useReminderStore } from "@/stores/useReminderStore";
 import { useJourneyStore } from "@/stores/useJourneyStore";
+import { useFocusGuardStore } from "@/stores/useFocusGuardStore";
 
 /** Saved-copy key of each store; identical to the web app so backups move between the two. */
 export const STORE_KEYS = {
@@ -20,8 +21,8 @@ export type Slot = keyof typeof STORE_KEYS;
 
 const ALL = { main: useAppStore, vault: useVaultStore, planner: usePlannerStore, projects: useProjectsStore, journey: useJourneyStore };
 
-// Every persisted store, including the phone-only reminder settings that backups leave out.
-const HYDRATED = [...Object.values(ALL), useReminderStore];
+// Every persisted store, including the phone-only ones (reminders, focus guard) that backups leave out.
+const HYDRATED = [...Object.values(ALL), useReminderStore, useFocusGuardStore];
 const allHydrated = () => HYDRATED.every((s) => s.persist.hasHydrated());
 const subscribeHydration = (onChange: () => void) => {
   const unsubs = HYDRATED.map((s) => s.persist.onFinishHydration(onChange));
@@ -41,6 +42,7 @@ export async function resetEverything() {
   usePlannerStore.setState(usePlannerStore.getInitialState(), true);
   useProjectsStore.setState(useProjectsStore.getInitialState(), true);
   useJourneyStore.setState(useJourneyStore.getInitialState(), true);
+  useFocusGuardStore.setState(useFocusGuardStore.getInitialState(), true);
 }
 
 /** Reloads every store from its saved copy, e.g. after importing a backup. */

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View } from "react-native";
+import { Linking, Platform, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { EXTERNAL_INTERRUPTION, useAppStore, type FocusTimerMode } from "@/stores/useAppStore";
@@ -24,6 +24,8 @@ import {
 } from "@/components/ui";
 import { FrogLinkSheet, LineageLine } from "@/components/today/FrogLinkSheet";
 import { RcaTriageModal, type BugType } from "@/components/today/RcaTriageModal";
+import { useFocusGuardStore } from "@/stores/useFocusGuardStore";
+import { deepBlocksOn, isEarlyQuit } from "@/lib/focusGuard";
 
 const MODES: { value: FocusTimerMode; label: string; minutes: number; caption: string }[] = [
   { value: "WORK_90", label: "كتلة 1 (90 د)", minutes: 90, caption: "الضفدع الأساسي · تركيز عميق" },
@@ -31,6 +33,7 @@ const MODES: { value: FocusTimerMode; label: string; minutes: number; caption: s
   { value: "WORK_45", label: "كتلة 3 (45 د)", minutes: 45, caption: "إغلاق الالتزامات" },
   { value: "WORDS_25", label: "25 د", minutes: 25, caption: "جلسة قصيرة" },
   { value: "FLUENCY_15", label: "15 د", minutes: 15, caption: "دفعة بدء" },
+  { value: "KICKOFF_10", label: "10 د", minutes: 10, caption: "كتلة إقلاع" },
 ];
 
 const EXIT_REASONS = [EXTERNAL_INTERRUPTION, "تعب أو إرهاق", "تشتّت وهروب", "المهمة لم تكن واضحة"];
@@ -91,6 +94,19 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
   const [masteryGateOpen, setMasteryGateOpen] = useState(false);
   const [focusMasteryDod, setFocusMasteryDod] = useState("");
 
+  // Focus guard
+  const guard = useFocusGuardStore();
+  const today = toLocalDateString();
+  const [drainAsk, setDrainAsk] = useState(false);
+  const deepToday = deepBlocksOn(today, focusSessions);
+  const showEnough = !isFocusRunning && deepToday >= guard.deepCap && guard.enoughShownDate !== today;
+  const showDnd = Platform.OS === "android" && !isFocusRunning && guard.dndPromptDate !== today;
+  const kickoffDone = guard.kickoffActive && !isFocusRunning;
+  const openDnd = () => {
+    guard.markDndPrompted();
+    Linking.sendIntent("android.settings.ZEN_MODE_SETTINGS").catch(() => Linking.openSettings());
+  };
+
   const [prevFrogId, setPrevFrogId] = useState(current?.id);
   if (current?.id !== prevFrogId) {
     setPrevFrogId(current?.id);
@@ -128,8 +144,15 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
   const eyeBlock = Math.floor(elapsed / 900);
   const eyeBreak = isFocusRunning && focusMode === "WORK_90" && eyeBlock > 0 && eyeBlock !== eyeDismissedBlock && elapsed % 900 < 60;
 
-  const start = () => {
+  const start = (confirmedDrain = false) => {
     if (!commitment.trim() || !current || allDone) return;
+    // A 90-minute block on draining work burns the day's best hours.
+    if (!confirmedDrain && focusMode === "WORK_90" && current.energyTag === "drain") {
+      setDrainAsk(true);
+      return;
+    }
+    setDrainAsk(false);
+    guard.setKickoffActive(false);
     setEndedEarly(false);
     const trimmedCommitment = commitment.trim();
     if (!current.definitionOfDone) {
@@ -174,13 +197,18 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
 
   const endEarly = () => {
     if (!exitReason.trim()) return;
+    const startedAt = s.focusStartedAt;
+    const quitEarly = Boolean(startedAt && isEarlyQuit(Date.now() - startedAt)) && exitReason !== EXTERNAL_INTERRUPTION;
+    if (quitEarly) guard.setResumable({ mode: focusMode, secondsLeft: focusSecondsRemaining, commitment: focusCommitment });
     s.finishFocusSession({ completed: false, earlyExitReason: exitReason.trim() });
+    if (quitEarly) guard.flagDistraction("early-quit");
     setExitReason("");
     setExitOpen(false);
     setEndedEarly(true);
   };
 
-  const handleApplyRcaPatch = (_bugType: BugType, patch: string) => {
+  const handleApplyRcaPatch = (bugType: BugType, patch: string) => {
+    guard.logRca(bugType);
     setRcaNotice(`تم تطبيق الترقيع: ${patch}`);
     setTimeout(() => setRcaNotice(null), 5000);
   };
@@ -275,12 +303,8 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
       <View style={{ marginTop: 22, gap: 14, alignItems: "stretch" }}>
         {isFocusRunning ? (
           <Row style={{ justifyContent: "center", flexWrap: "wrap" }} gap={8}>
-            <Button
-              title="⚡ تفريغ خاطرة سريعة"
-              icon="zap"
-              size="sm"
-              onPress={onOpenScratchpad}
-            />
+            <Button title="💡 فكرة" size="sm" onPress={onOpenScratchpad} />
+            <Button title="😵 مشتت" variant="secondary" size="sm" onPress={() => guard.flagDistraction("manual")} />
             <Button
               title="2-Min RCA"
               icon="tool"
@@ -363,6 +387,49 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
               </View>
             ) : null}
 
+            {kickoffDone ? (
+              <View style={{ borderRadius: radius.md, backgroundColor: c.brandSoft, padding: 14, gap: 10 }}>
+                <Txt variant="ui" weight="medium" align="center">
+                  أقلعت. أكمل الكتلة الأصلية؟
+                </Txt>
+                <Row style={{ justifyContent: "center", flexWrap: "wrap" }}>
+                  <Button
+                    title={guard.resumable ? `نعم · باقي ${formatTime(guard.resumable.secondsLeft)}` : "نعم · كتلة كاملة"}
+                    icon="play"
+                    size="sm"
+                    onPress={() => {
+                      const r = guard.resumable;
+                      guard.setKickoffActive(false);
+                      guard.setResumable(null);
+                      if (r) useAppStore.setState({ focusMode: r.mode, focusSecondsRemaining: r.secondsLeft });
+                      else s.resetFocus("WORK_45");
+                      useAppStore.getState().startFocus(r?.commitment || current?.definitionOfDone || current?.title || "");
+                    }}
+                  />
+                  <Button
+                    title="لاحقاً"
+                    variant="ghost"
+                    size="sm"
+                    onPress={() => {
+                      guard.setKickoffActive(false);
+                      guard.setResumable(null);
+                    }}
+                  />
+                </Row>
+              </View>
+            ) : null}
+
+            {showEnough ? (
+              <View style={{ borderRadius: radius.md, backgroundColor: c.accentSoft, padding: 14, gap: 10 }}>
+                <Txt variant="ui" weight="medium" align="center">
+                  اكتفيت: {deepToday} كتل عميقة اليوم. ما بعدها صيانة خفيفة أو راحة، لا كتلة عميقة جديدة.
+                </Txt>
+                <Row style={{ justifyContent: "center" }}>
+                  <Button title="حسناً" variant="ghost" size="sm" onPress={guard.markEnoughShown} />
+                </Row>
+              </View>
+            ) : null}
+
             {/* Block mode selector */}
             <Segmented<FocusTimerMode>
               value={focusMode}
@@ -406,7 +473,32 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
                   />
                 </View>
 
-                <Button title="ألتزم بالعقد وأبدأ 🚀" icon="play" size="lg" disabled={!commitment.trim()} onPress={start} />
+                {drainAsk ? (
+                  <View style={{ borderRadius: radius.md, backgroundColor: c.dangerSoft, padding: 14, gap: 10 }}>
+                    <Txt variant="ui" weight="medium" color="danger" align="center">
+                      «{current.title}» مهمة استنزاف. كتلة 90 دقيقة عليها تحرق أفضل ساعات يومك.
+                    </Txt>
+                    <Row style={{ justifyContent: "center", flexWrap: "wrap" }}>
+                      <Button
+                        title="أجّلها لآخر اليوم"
+                        icon="corner-down-left"
+                        size="sm"
+                        onPress={() => {
+                          s.reorderFrog(current.id, frogs.length - 1);
+                          setDrainAsk(false);
+                        }}
+                      />
+                      <Button title="ابدأ رغم ذلك" variant="ghost" size="sm" onPress={() => start(true)} />
+                    </Row>
+                  </View>
+                ) : null}
+                {showDnd ? (
+                  <Button title="🔕 فعّل «لا تزعجني» قبل البدء" variant="secondary" size="sm" onPress={openDnd} />
+                ) : null}
+                <Button title="ألتزم بالعقد وأبدأ 🚀" icon="play" size="lg" disabled={!commitment.trim()} onPress={() => start()} />
+                <View style={{ alignItems: "center" }}>
+                  <LinkButton title="😵 مشتت؟ أربع نقرات للعودة" color="ink3" onPress={() => guard.flagDistraction("manual")} />
+                </View>
                 {canRepeat ? (
                   <Button
                     title={`كرر الجلسة: ${lastSession.plannedMinutes} د · «${lastSession.commitment}»`}

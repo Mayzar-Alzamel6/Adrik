@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { View } from "react-native";
-import { useReminderStore, type DailyReminder } from "@/stores/useReminderStore";
+import { useReminderStore, type DailyReminder, type ReminderKind } from "@/stores/useReminderStore";
 import { notificationsSupported, syncDailyReminder } from "@/lib/notifications";
 import { ROW, useColors } from "@/theme";
 import { Chip, SwitchRow, Txt } from "@/components/ui";
@@ -8,16 +8,24 @@ import { Chip, SwitchRow, Txt } from "@/components/ui";
 const TIMES = {
   morning: [6, 7, 8, 9],
   evening: [20, 21, 22, 23],
+  weekly: [16, 18, 20],
 } as const;
+
+const TEXT: Record<ReminderKind, { title: string; description: string }> = {
+  morning: { title: "تذكير الصباح", description: "ابدأ أولويتك الأولى قبل أن يسبقك شيء." },
+  evening: { title: "تذكير المساء", description: "أغلق يومك واعتمد أولويات الغد." },
+  weekly: { title: "المراجعة الأسبوعية (الجمعة)", description: "الضفادع، المشتتات، وزمن العودة." },
+};
 
 const label = (hour: number) => `${hour > 12 ? hour - 12 : hour}:00 ${hour < 12 ? "ص" : "م"}`;
 
 export function RemindersPanel() {
   const c = useColors();
-  const { morning, evening, setReminder } = useReminderStore();
+  const reminders = useReminderStore();
+  const { setReminder } = reminders;
   const [denied, setDenied] = useState(false);
 
-  const update = async (which: "morning" | "evening", current: DailyReminder, changes: Partial<DailyReminder>) => {
+  const update = async (which: ReminderKind, current: DailyReminder, changes: Partial<DailyReminder>) => {
     const next = { ...current, ...changes };
     const ok = await syncDailyReminder(which, next);
     if (!ok) {
@@ -39,13 +47,13 @@ export function RemindersPanel() {
 
   return (
     <View>
-      {(["morning", "evening"] as const).map((which, i) => {
-        const r = which === "morning" ? morning : evening;
+      {(["morning", "evening", "weekly"] as const).map((which, i) => {
+        const r = reminders[which];
         return (
           <View key={which} style={{ borderTopWidth: i ? 1 : 0, borderTopColor: c.line, paddingBottom: 8 }}>
             <SwitchRow
-              title={which === "morning" ? "تذكير الصباح" : "تذكير المساء"}
-              description={which === "morning" ? "ابدأ أولويتك الأولى قبل أن يسبقك شيء." : "أغلق يومك واعتمد أولويات الغد."}
+              title={TEXT[which].title}
+              description={TEXT[which].description}
               value={r.enabled}
               onChange={(enabled) => update(which, r, { enabled })}
             />

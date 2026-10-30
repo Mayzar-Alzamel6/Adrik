@@ -6,6 +6,7 @@ import { radius, ROW, useColors } from "@/theme";
 import { Card, Row, Screen, Txt } from "@/components/ui";
 import { YearMatrix52 } from "@/components/review/YearMatrix52";
 import { CompletionPanel } from "@/components/review/CompletionPanel";
+import { OutputPanel } from "@/components/review/OutputPanel";
 import { ValueWeekPanel } from "@/components/review/ValueWeekPanel";
 import { CoachReviewPanel } from "@/components/review/CoachReviewPanel";
 import { PERSONAL_SYNC_ENABLED } from "@/lib/sync/flag";
@@ -45,6 +46,7 @@ export default function ReviewScreen() {
         </Txt>
       </View>
 
+      <OutputPanel />
       <CompletionPanel />
       {/* The coach is the founder's prototype: personal builds only. */}
       {PERSONAL_SYNC_ENABLED ? <CoachReviewPanel /> : null}

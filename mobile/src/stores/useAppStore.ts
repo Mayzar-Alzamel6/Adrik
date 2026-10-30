@@ -29,6 +29,36 @@ export interface FrogTask {
   isRerouted?: boolean;
   isDropped?: boolean;
   dropReason?: string;
+  /** The anchored priority this task was pulled under. */
+  anchorId?: string;
+  /** Days this task was carried over unfinished; three suggest a conscious drop. */
+  rolloverCount?: number;
+}
+
+/** A priority that stays every day until closed by hand, tied to one project; today's tasks are pulled from it. */
+export interface AnchorPriority {
+  id: string;
+  title: string;
+  projectId: string;
+  /** The far goal and its date. */
+  goal: string;
+  targetDate?: string;
+  order: number;
+  createdAt: string;
+  closedAt?: string;
+}
+
+export const MAX_ANCHORS = 3;
+export const MAX_TASKS_PER_ANCHOR = 3;
+
+/** Groups today's list under the anchors in their order (unanchored last), so the first task of anchor #1 is the frog. */
+export function groupByAnchor<T extends { order: number; anchorId?: string }>(frogs: T[], anchors: AnchorPriority[]): T[] {
+  const open = anchors.filter((a) => !a.closedAt).sort((a, b) => a.order - b.order);
+  const rank = (f: T) => {
+    const i = open.findIndex((a) => a.id === f.anchorId);
+    return i < 0 ? open.length : i;
+  };
+  return [...frogs].sort((a, b) => rank(a) - rank(b) || a.order - b.order).map((f, i) => ({ ...f, order: i + 1 }));
 }
 
 export type FrogLinks = Pick<FrogTask, "projectId" | "skillId">;
@@ -228,6 +258,7 @@ export type FocusTimerMode =
   | "WORK_45"
   | "FLUENCY_15"
   | "WORDS_25"
+  | "KICKOFF_10"
   | "MICRO_BREAK"
   | "DMN_STILLNESS";
 
@@ -259,6 +290,7 @@ export const FOCUS_MODE_MINUTES: Partial<Record<FocusTimerMode, number>> = {
   WORK_45: 45,
   WORDS_25: 25,
   FLUENCY_15: 15,
+  KICKOFF_10: 10,
 };
 
 /** Rest scales with the effort it follows: a deep 90-minute block earns a real break. */
@@ -319,6 +351,14 @@ interface AppState {
     category: TaskCategory,
     links?: FrogLinks & { projectTaskId?: string }
   ) => { ok: true; id: string } | { ok: false; message: string };
+  // Anchored priorities
+  anchors: AnchorPriority[];
+  addAnchor: (input: { title: string; projectId: string; goal: string; targetDate?: string }) => { ok: true } | { ok: false; message: string };
+  updateAnchor: (id: string, updates: Partial<Pick<AnchorPriority, "title" | "goal" | "targetDate">>) => void;
+  closeAnchor: (id: string) => void;
+  moveAnchor: (id: string, toIndex: number) => void;
+  /** Pulls an open task of the anchor's project into today, under the anchor. */
+  pullAnchorTask: (anchorId: string, taskId: string) => { ok: true } | { ok: false; message: string };
   /** Makes a project task one of today's priorities, in the first free slot. */
   addFrogFromProjectTask: (projectId: string, taskId: string) => { ok: true } | { ok: false; message: string };
   /** Mirrors a status change made on the project side onto today's matching priority. */
@@ -871,7 +911,16 @@ export const useAppStore = create<AppState>()(
                   order: idx + 1,
                 }))
               : // No plan for today: carry what was left unfinished — never yesterday's finished work.
-                state.frogs.filter((f) => !f.isCompleted).map((f, idx) => ({ ...f, order: idx + 1 }));
+                state.frogs.filter((f) => !f.isCompleted).map((f, idx) => ({ ...f, order: idx + 1, rolloverCount: (f.rolloverCount ?? 0) + 1 }));
+          // Unfinished tasks of an open anchor always roll over under it, even when tomorrow was planned.
+          const planned = new Set(nextFrogs.flatMap((f) => [f.id, f.projectTaskId].filter(Boolean)));
+          const anchorCarry =
+            state.tomorrowFrogs && state.tomorrowFrogs.length > 0
+              ? state.frogs
+                  .filter((f) => !f.isCompleted && !f.isDropped && f.anchorId && state.anchors.some((a) => a.id === f.anchorId && !a.closedAt))
+                  .filter((f) => !planned.has(f.id) && !(f.projectTaskId && planned.has(f.projectTaskId)))
+                  .map((f) => ({ ...f, order: nextFrogs.length + 1, rolloverCount: (f.rolloverCount ?? 0) + 1 }))
+              : [];
 
           const isNeuroDoneToday =
             state.neuroGateDate === today && (state.neuroGatePassed || state.neuroGateSkipped);
@@ -906,7 +955,7 @@ export const useAppStore = create<AppState>()(
             currentDay: today,
             habitHistory: closedHabits.size ? { ...state.habitHistory, [state.currentDay]: [...closedHabits] } : state.habitHistory,
             frogHistory: [closedDay, ...state.frogHistory.filter((d) => d.date !== state.currentDay)].slice(0, 400),
-            frogs: nextFrogs.map((f) => ({ ...f, completedAt: undefined })),
+            frogs: groupByAnchor([...nextFrogs, ...anchorCarry], state.anchors).map((f) => ({ ...f, completedAt: undefined })),
             tomorrowFrogs: null,
             activeFrogId: null,
             binaryHabits: state.binaryHabits.map((h) => ({ ...h, isCompleted: false })),
@@ -980,7 +1029,7 @@ export const useAppStore = create<AppState>()(
       },
       appendFrog: (title, category, links = {}) => {
         const frogs = get().frogs;
-        if (frogs.filter((f) => !f.isCompleted).length >= 3) {
+        if (frogs.filter((f) => !f.isCompleted && !f.isDropped && !f.anchorId).length >= 3) {
           return { ok: false, message: "لديك ثلاث أولويات مفتوحة. أنجز واحدة أولاً، أو أرسل هذه إلى صندوق المهام." };
         }
         const id = `frog-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -997,6 +1046,67 @@ export const useAppStore = create<AppState>()(
         };
         set({ frogs: [...frogs, frog] });
         return { ok: true, id };
+      },
+      anchors: [],
+      addAnchor: ({ title, projectId, goal, targetDate }) => {
+        const open = get().anchors.filter((a) => !a.closedAt);
+        if (open.length >= MAX_ANCHORS) return { ok: false, message: "ثلاث أولويات ثابتة كحد أقصى. أغلق واحدة أولاً." };
+        if (open.some((a) => a.projectId === projectId)) return { ok: false, message: "هذا المشروع مرتبط بأولوية ثابتة بالفعل." };
+        if (!title.trim()) return { ok: false, message: "اكتب اسم الأولوية." };
+        const anchor: AnchorPriority = {
+          id: `anchor-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          title: title.trim(),
+          projectId,
+          goal: goal.trim(),
+          ...(targetDate ? { targetDate } : {}),
+          order: open.length ? Math.max(...open.map((a) => a.order)) + 1 : 1,
+          createdAt: new Date().toISOString(),
+        };
+        set({ anchors: [...get().anchors, anchor] });
+        return { ok: true };
+      },
+      updateAnchor: (id, updates) => set({ anchors: get().anchors.map((a) => (a.id === id ? { ...a, ...updates } : a)) }),
+      closeAnchor: (id) => {
+        const anchors = get().anchors.map((a) => (a.id === id ? { ...a, closedAt: new Date().toISOString() } : a));
+        set({ anchors, frogs: groupByAnchor(get().frogs, anchors) });
+      },
+      moveAnchor: (id, toIndex) => {
+        const open = get().anchors.filter((a) => !a.closedAt).sort((a, b) => a.order - b.order);
+        const from = open.findIndex((a) => a.id === id);
+        if (from < 0) return;
+        const [moved] = open.splice(from, 1);
+        open.splice(Math.max(0, Math.min(toIndex, open.length)), 0, moved);
+        const order = new Map(open.map((a, i) => [a.id, i + 1]));
+        const anchors = get().anchors.map((a) => (order.has(a.id) ? { ...a, order: order.get(a.id)! } : a));
+        set({ anchors, frogs: groupByAnchor(get().frogs, anchors) });
+      },
+      pullAnchorTask: (anchorId, taskId) => {
+        const state = get();
+        const anchor = state.anchors.find((a) => a.id === anchorId && !a.closedAt);
+        const project = useProjectsStore.getState().projects.find((p) => p.id === anchor?.projectId);
+        const task = project?.tasks.find((t) => t.id === taskId);
+        if (!anchor || !project || !task) return { ok: false, message: "لم أجد المهمة." };
+        if (state.frogs.some((f) => f.projectTaskId === taskId && !f.isCompleted && !f.isDropped)) {
+          return { ok: false, message: "هذه المهمة ضمن اليوم بالفعل." };
+        }
+        if (state.frogs.filter((f) => f.anchorId === anchorId && !f.isCompleted && !f.isDropped).length >= MAX_TASKS_PER_ANCHOR) {
+          return { ok: false, message: `${MAX_TASKS_PER_ANCHOR} مهام مفتوحة تحت هذه الأولوية. أنجز واحدة أولاً.` };
+        }
+        const frog: FrogTask = {
+          id: `frog-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          title: task.title,
+          order: state.frogs.length + 1,
+          category: task.quadrant === "EMERGENCY" ? "EMERGENCY" : "QUALITY",
+          isCompleted: false,
+          createdAt: new Date().toISOString(),
+          projectId: project.id,
+          projectTaskId: taskId,
+          anchorId,
+          ...(project.skillIds?.length === 1 ? { skillId: project.skillIds[0] } : {}),
+        };
+        set({ frogs: groupByAnchor([...state.frogs, frog], state.anchors) });
+        if (task.status === "TODO") useProjectsStore.getState().setTaskStatus(project.id, taskId, "DOING");
+        return { ok: true };
       },
       addFrogFromProjectTask: (projectId, taskId) => {
         const state = get();
@@ -1321,6 +1431,7 @@ export const useAppStore = create<AppState>()(
           WORK_45: 45 * 60,
           FLUENCY_15: 15 * 60,
           WORDS_25: 25 * 60,
+          KICKOFF_10: 10 * 60,
           MICRO_BREAK: 10,
           DMN_STILLNESS: 15 * 60,
         };

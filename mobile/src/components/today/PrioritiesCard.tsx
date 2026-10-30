@@ -35,6 +35,7 @@ export function PrioritiesCard() {
   const appendFrog = useAppStore((s) => s.appendFrog);
   const deleteFrog = useAppStore((s) => s.deleteFrog);
   const reorderFrog = useAppStore((s) => s.reorderFrog);
+  const anchors = useAppStore((s) => s.anchors);
   const addRerouteEvent = useAppStore((s) => s.addRerouteEvent);
 
   const isFocusRunning = useAppStore((s) => s.isFocusRunning);
@@ -536,6 +537,36 @@ export function PrioritiesCard() {
                         </Txt>
                       </Pressable>
                     )}
+
+                    {/* Anchor and rollover */}
+                    {frog.anchorId || (frog.rolloverCount ?? 0) > 0 ? (
+                      <Row gap={6} style={{ flexWrap: "wrap" }}>
+                        {frog.anchorId ? (
+                          <Txt variant="caption" color="brand" weight="medium">
+                            🎯 {anchors.find((a) => a.id === frog.anchorId)?.title ?? "أولوية مغلقة"} ›
+                          </Txt>
+                        ) : null}
+                        {(frog.rolloverCount ?? 0) > 0 && !frog.isCompleted ? (
+                          <Txt variant="caption" color={(frog.rolloverCount ?? 0) >= 3 ? "danger" : "accentStrong"} weight="medium">
+                            مُرحّلة ×{frog.rolloverCount}
+                          </Txt>
+                        ) : null}
+                        {(frog.rolloverCount ?? 0) >= 3 && !frog.isCompleted && !frog.isDropped ? (
+                          <Pressable
+                            onPress={() => {
+                              setDroppingFrog(frog);
+                              setDropReason("رُحّلت 3 مرات: لا تستحق مكانها اليوم");
+                            }}
+                            accessibilityRole="button"
+                            hitSlop={6}
+                          >
+                            <Txt variant="caption" color="danger" style={{ textDecorationLine: "underline" }}>
+                              إسقاط واعٍ؟
+                            </Txt>
+                          </Pressable>
+                        ) : null}
+                      </Row>
+                    ) : null}
 
                     {/* Dropped status or DoD display */}
                     {frog.isDropped ? (

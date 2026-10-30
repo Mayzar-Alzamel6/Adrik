@@ -26,6 +26,9 @@ import {
   Txt,
 } from "@/components/ui";
 import { ProjectPrioritySheet } from "@/components/today/ProjectPrioritySheet";
+import { useFocusGuardStore } from "@/stores/useFocusGuardStore";
+import { deepMinutesSeries } from "@/lib/output";
+import { formatMinutes } from "@/lib/utils";
 import {
   FrogLinkButton,
   FrogLinkSheet,
@@ -157,6 +160,8 @@ export function EveningClosure() {
           <Summary label="أصوات الهوية" value={String(identityVotes.length)} />
         </Row>
       </Card>
+
+      <OutputToday />
 
       {/* INTJ-A Quality Gate (0 or 1) */}
       <Card style={{ gap: 12 }}>
@@ -621,5 +626,49 @@ function Summary({ label, value }: { label: string; value: string }) {
         {label}
       </Txt>
     </View>
+  );
+}
+
+/** Tonight's output number and the 🔋 recharge habit. */
+function OutputToday() {
+  const c = useColors();
+  const frogs = useAppStore((s) => s.frogs);
+  const frogHistory = useAppStore((s) => s.frogHistory);
+  const currentDay = useAppStore((s) => s.currentDay);
+  const focusSessions = useAppStore((s) => s.focusSessions);
+  const recharged = useFocusGuardStore((s) => s.rechargeDates.includes(currentDay));
+  const toggleRecharge = useFocusGuardStore((s) => s.toggleRecharge);
+  const today = deepMinutesSeries({ frogs, frogHistory, currentDay, focusSessions }, 1)[0]?.minutes ?? 0;
+  return (
+    <Card style={{ gap: 12 }}>
+      <Row style={{ justifyContent: "space-between" }}>
+        <View>
+          <Txt variant="caption" color="ink3">
+            عمل عميق منجز اليوم
+          </Txt>
+          <Txt variant="title" weight="bold" color={today ? "brand" : "ink3"}>
+            {formatMinutes(today)}
+          </Txt>
+        </View>
+        <Feather name="trending-up" size={20} color={c.brand} />
+      </Row>
+      <Pressable
+        onPress={() => {
+          tapFeedback();
+          toggleRecharge(currentDay);
+        }}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: recharged }}
+        style={{ flexDirection: ROW, alignItems: "center", gap: 10, borderRadius: radius.md, backgroundColor: recharged ? c.brandSoft : c.surface2, padding: 12 }}
+      >
+        <Feather name={recharged ? "check-circle" : "circle"} size={20} color={recharged ? c.brand : c.ink3} />
+        <View style={{ flex: 1 }}>
+          <Txt weight="medium">🔋 شحن</Txt>
+          <Txt variant="caption" color="ink2">
+            وقت وحدك بلا شاشات ولا مهام: مشي، قراءة، أو صمت.
+          </Txt>
+        </View>
+      </Pressable>
+    </Card>
   );
 }

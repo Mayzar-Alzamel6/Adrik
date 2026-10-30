@@ -16,7 +16,8 @@
       "distribution": "internal",
       "env": {
         "APP_VARIANT": "personal",
-        "EXPO_PUBLIC_PERSONAL_SYNC": "1"
+        "EXPO_PUBLIC_PERSONAL_SYNC": "1",
+        "ORG_GRADLE_PROJECT_reactNativeArchitectures": "arm64-v8a"
       },
       "android": {
         "buildType": "apk"

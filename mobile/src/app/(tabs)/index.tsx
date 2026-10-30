@@ -7,6 +7,8 @@ import { radius, useColors } from "@/theme";
 import { Row, Screen, Segmented, Txt } from "@/components/ui";
 import { FocusCard } from "@/components/today/FocusCard";
 import { PrioritiesCard } from "@/components/today/PrioritiesCard";
+import { AnchorsCard } from "@/components/today/AnchorsCard";
+import { TuningCard } from "@/components/today/TuningCard";
 import { TodayStats } from "@/components/today/TodayStats";
 import { EveningClosure } from "@/components/today/EveningClosure";
 import { RecoveryBanner } from "@/components/today/RecoveryBanner";
@@ -126,7 +128,9 @@ export default function TodayScreen() {
         <FocusCard onOpenScratchpad={() => setScratchOpen(true)} />
       ) : (
         <>
+          <TuningCard />
           <FocusCard onOpenScratchpad={() => setScratchOpen(true)} />
+          <AnchorsCard />
           <PrioritiesCard />
           <JourneyCard />
           <HabitsTodayCard />

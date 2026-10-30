@@ -39,7 +39,11 @@ export function ProjectPrioritySheet({
 
 function Picker({ onDone, onPick }: { onDone: () => void; onPick?: (task: PickedTask) => void }) {
   const c = useColors();
-  const projects = useProjectsStore((s) => s.projects);
+  const allProjects = useProjectsStore((s) => s.projects);
+  const anchors = useAppStore((s) => s.anchors);
+  // With anchored priorities, today only draws from their projects; the rest stay on the projects screen.
+  const openAnchors = anchors.filter((a) => !a.closedAt);
+  const projects = openAnchors.length ? allProjects.filter((p) => openAnchors.some((a) => a.projectId === p.id)) : allProjects;
   const values = useAppStore((s) => s.values);
   const frogs = useAppStore((s) => s.frogs);
   const [projectId, setProjectId] = useState(projects[0]?.id);
@@ -80,7 +84,10 @@ function Picker({ onDone, onPick }: { onDone: () => void; onPick?: (task: Picked
       onDone();
       return;
     }
-    const res = useAppStore.getState().addFrogFromProjectTask(project.id, taskId);
+    const anchor = openAnchors.find((a) => a.projectId === project.id);
+    const res = anchor
+      ? useAppStore.getState().pullAnchorTask(anchor.id, taskId)
+      : useAppStore.getState().addFrogFromProjectTask(project.id, taskId);
     if (res.ok) onDone();
     else setError(res.message);
   };
