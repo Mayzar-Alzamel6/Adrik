@@ -44,3 +44,14 @@ next-env.d.ts
 # prisma sqlite database
 dev.db
 dev.db-journal
+
+# mobile
+mobile/node_modules/
+mobile/.expo/
+mobile/android/
+mobile/ios/
+mobile/dist/
+mobile/.env*
+*.keystore
+*.jks
+
