@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useLocalSearchParams } from "expo-router";
 import { Pressable, ScrollView, View } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { useAppStore } from "@/stores/useAppStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { sendToToday } from "@/lib/flow";

@@ -1,3 +1,5 @@
+import { toLocalDateString } from "./utils";
+
 /**
  * Pure rules of the focus guard: when a slip counts as distraction, how the day escalates,
  * the output metrics and the weekly load tuning. No React, no stores, so `npm test` covers it.
@@ -42,6 +44,8 @@ export const NO_START_MS = 30 * 60000;
 export const KICKOFF_MINUTES = 10;
 export const DEEP_CAP_MIN = 2;
 export const DEEP_CAP_MAX = 4;
+/** A block shorter than this is a warm-up, never deep work. */
+export const DEEP_MIN_MINUTES = 45;
 
 /** Leaving the app twice in one session, or staying away more than five minutes, is a slip. */
 export function awayTrigger(exits: number, awayMs: number): DistractionTrigger | null {
@@ -58,6 +62,10 @@ export function isNoStart(dayStartedAt: number | null, now: number, startedToday
 }
 
 export type Escalation = "none" | "shorten" | "recharge";
+
+/** Slips that weigh on the escalation ladder: leaving or quitting a block. Not starting is a different problem. */
+export const slipsForEscalation = (events: DistractionEvent[], date: string) =>
+  events.filter((e) => e.date === date && e.trigger !== "no-start").length;
 
 /** The third slip of a day suggests a lighter block; the fourth and later suggest recharging. */
 export function escalationFor(slipsToday: number): Escalation {
@@ -104,24 +112,22 @@ interface SessionLike {
   taskId?: string;
 }
 
-const localDate = (iso: string) => {
-  const d = new Date(iso);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
+const localDate = (iso: string) => toLocalDateString(new Date(iso));
+const isDeep = (s: SessionLike) => s.plannedMinutes >= DEEP_MIN_MINUTES;
 
 /**
- * Deep work delivered on a day: full sessions on genius or neutral work that were not rated as a miss.
- * Ended-early and dropped work never count.
+ * Deep work delivered on a day: full blocks of 45 minutes or more on genius or neutral work that were not rated as a miss.
+ * Short sessions, kickoffs, ended-early and dropped work never count.
  */
 export function deepMinutesOn(date: string, sessions: SessionLike[], energyOf: (taskId?: string) => Energy | undefined) {
   return sessions
-    .filter((s) => localDate(s.endedAt) === date && s.completed && s.outcome !== "NOT" && energyOf(s.taskId) !== "drain")
+    .filter((s) => localDate(s.endedAt) === date && isDeep(s) && s.completed && s.outcome !== "NOT" && energyOf(s.taskId) !== "drain")
     .reduce((sum, s) => sum + s.actualMinutes, 0);
 }
 
 /** Full deep blocks (45 minutes or more) finished today — what the "enough" alert counts. */
 export function deepBlocksOn(date: string, sessions: SessionLike[]) {
-  return sessions.filter((s) => localDate(s.endedAt) === date && s.completed && s.plannedMinutes >= 45).length;
+  return sessions.filter((s) => localDate(s.endedAt) === date && s.completed && isDeep(s)).length;
 }
 
 interface DayLike {
@@ -164,9 +170,14 @@ export function applyTuning(cap: number, change: TuningChange) {
   return Math.max(DEEP_CAP_MIN, Math.min(DEEP_CAP_MAX, next));
 }
 
-/** Share of sessions in the window that ran to the end. */
+/** The default block follows the load: a lighter day gets shorter blocks, a stronger one the full 90. */
+export function blockMinutesForCap(cap: number) {
+  return cap <= DEEP_CAP_MIN ? 45 : cap >= DEEP_CAP_MAX ? 90 : 60;
+}
+
+/** Share of deep blocks in the window that ran to the end; warm-ups and kickoffs do not count. */
 export function sessionCompletionRate(sessions: SessionLike[], dates: string[]) {
-  const inWindow = sessions.filter((s) => dates.includes(localDate(s.endedAt)));
+  const inWindow = sessions.filter((s) => isDeep(s) && dates.includes(localDate(s.endedAt)));
   if (!inWindow.length) return null;
   return Math.round((inWindow.filter((s) => s.completed).length / inWindow.length) * 100);
 }

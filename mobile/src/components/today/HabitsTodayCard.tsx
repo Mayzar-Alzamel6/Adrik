@@ -1,6 +1,6 @@
 import React from "react";
 import { Pressable, View } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
 import { useAppStore } from "@/stores/useAppStore";
 import { habitStats, isDue } from "@/lib/habits";

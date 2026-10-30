@@ -48,7 +48,7 @@ export function AppRuntime() {
       const app = useAppStore.getState();
       const guard = useFocusGuardStore.getState();
       if (state === "background") {
-        if (!app.isFocusRunning || !app.focusEndsAt) return;
+        if (!app.isFocusRunning || !app.focusEndsAt || !guard.onPhone) return;
         guard.noteLeft();
         scheduleAwayReminders(app.focusEndsAt, sessionLabelOf(app)).catch(() => {});
         return;
@@ -59,6 +59,7 @@ export function AppRuntime() {
       cancelAwayReminders().catch(() => {});
       const awayMs = guard.noteBack();
       if (app.isFocusRunning) app.tickFocus();
+      if (!guard.onPhone) return;
       const trigger = awayTrigger(useFocusGuardStore.getState().sessionExits, awayMs);
       if (trigger && useAppStore.getState().isFocusRunning) guard.flagDistraction(trigger);
     });

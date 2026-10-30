@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
 import { starterHabitOptions, useAppStore, type BinaryHabit } from "@/stores/useAppStore";
 import {

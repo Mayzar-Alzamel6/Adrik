@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { ScrollView, View } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { useAppStore, type CalendarEventItem } from "@/stores/useAppStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { sendToInbox } from "@/lib/flow";

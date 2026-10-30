@@ -17,7 +17,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { ROW, TEXT_START, fonts, radius, useColors, type ColorName } from "@/theme";
 
 export type IconName = React.ComponentProps<typeof Feather>["name"];

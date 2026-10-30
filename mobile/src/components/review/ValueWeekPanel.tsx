@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { View } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
 import { computeValueWeek, formatMinutes, useValueData } from "@/lib/valueInsights";
 import { shiftWeek, weekOf, weekRangeLabel } from "@/lib/utils";

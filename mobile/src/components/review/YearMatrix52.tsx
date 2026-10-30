@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Pressable, View } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { computeWeekColor, useAppStore, weeksOfYear, type WeekAuditItem, type WeeklyFrogStats } from "@/stores/useAppStore";
 import { weekOf, weekRangeLabel } from "@/lib/utils";
 import { ROW, radius, useColors, type ColorName } from "@/theme";

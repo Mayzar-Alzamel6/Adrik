@@ -278,3 +278,5 @@ interface TuningSuggestion {
 | Module 9 | ✅ | `arm64-v8a` في profile `personal` + `enableMinifyInReleaseBuilds` + `enableShrinkResourcesInReleaseBuilds`. |
 
 **التحقق:** `tsc` ✅ · `npm test` 124/124 ✅ · `expo lint` بلا أخطاء جديدة (خطأ `NeuroGate.tsx` سابق) · `expo export` أندرويد ✅ · تجربة ويب للمسارات الجديدة ✅. البناء `eas build` بانتظار الموافقة.
+
+**بعد المراجعة:** إصلاحات مراجعة v2 منفّذة، والتفاصيل في `docs/FIXES_V2_REVIEW.md`.

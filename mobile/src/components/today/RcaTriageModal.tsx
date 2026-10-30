@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { View, Pressable } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { Sheet, Txt, Row, Button, Input } from "@/components/ui";
 import { useColors, radius } from "@/theme";
 import { tapFeedback, successFeedback } from "@/lib/feedback";

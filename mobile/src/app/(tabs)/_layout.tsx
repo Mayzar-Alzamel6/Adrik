@@ -1,6 +1,6 @@
 import { Redirect, Tabs } from "expo-router";
 import { I18nManager } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { useAppStore } from "@/stores/useAppStore";
 import { fonts, useColors } from "@/theme";
 

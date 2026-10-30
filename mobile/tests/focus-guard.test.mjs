@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import {
   applyTuning,
   avgReturnMinutes,
+  blockMinutesForCap,
+  sessionCompletionRate,
+  slipsForEscalation,
   awayTrigger,
   deepBlocksOn,
   deepMinutesOn,
@@ -14,7 +17,7 @@ import {
   topDistractions,
   tuningChange,
 } from "../src/lib/focusGuard.ts";
-import { groupByAnchor } from "../src/stores/useAppStore.ts";
+import { groupByAnchor, MAX_OPEN_TODAY, useAppStore } from "../src/stores/useAppStore.ts";
 
 const at = (h, m = 0) => new Date(2026, 9, 30, h, m).toISOString();
 
@@ -113,4 +116,70 @@ test("groupByAnchor: tasks follow anchor order, so the frog is the first task un
   const out = groupByAnchor(frogs, anchors);
   assert.deepEqual(out.map((f) => f.id), ["b1", "b2", "a1", "free", "c1"]);
   assert.deepEqual(out.map((f) => f.order), [1, 2, 3, 4, 5]);
+});
+
+test("deep work counts only blocks of 45 minutes or more", () => {
+  const sessions = [
+    { endedAt: at(8), actualMinutes: 10, plannedMinutes: 10, completed: true, outcome: "DONE", taskId: "a" },
+    { endedAt: at(9), actualMinutes: 25, plannedMinutes: 25, completed: true, outcome: "DONE", taskId: "a" },
+    { endedAt: at(10), actualMinutes: 45, plannedMinutes: 45, completed: true, outcome: "DONE", taskId: "a" },
+  ];
+  assert.equal(deepMinutesOn("2026-10-30", sessions, () => "genius"), 45);
+  assert.equal(deepBlocksOn("2026-10-30", sessions), 1);
+  // A dropped kickoff does not pull the completion rate down, and a finished warm-up does not lift it.
+  const rate = sessionCompletionRate(
+    [...sessions, { endedAt: at(11), actualMinutes: 3, plannedMinutes: 10, completed: false, outcome: null }],
+    ["2026-10-30"]
+  );
+  assert.equal(rate, 100);
+});
+
+test("escalation ignores not-starting; leaving and quitting count", () => {
+  const ev = (trigger, date = "d") => ({ id: trigger + Math.random(), date, at: 0, trigger });
+  const events = [ev("no-start"), ev("exits"), ev("away"), ev("early-quit"), ev("manual", "other")];
+  assert.equal(slipsForEscalation(events, "d"), 3);
+});
+
+test("tuning sets the default block: 2 → 45, 3 → 60, 4 → 90", () => {
+  assert.deepEqual([2, 3, 4].map(blockMinutesForCap), [45, 60, 90]);
+});
+
+const frog = (id, order, extra = {}) => ({ id, title: id, order, isCompleted: false, category: "QUALITY", createdAt: "", ...extra });
+const anchor = (id, order) => ({ id, order, title: id, projectId: "p" + id, goal: "", createdAt: "" });
+
+test("the rule of three covers anchored and free tasks together", () => {
+  useAppStore.setState({ anchors: [anchor("A", 1)], frogs: [frog("a1", 1, { anchorId: "A" }), frog("a2", 2, { anchorId: "A" }), frog("f1", 3)] });
+  assert.equal(MAX_OPEN_TODAY, 3);
+  const res = useAppStore.getState().appendFrog("fourth", "QUALITY");
+  assert.equal(res.ok, false);
+  useAppStore.setState({ frogs: useAppStore.getState().frogs.map((f) => (f.id === "a1" ? { ...f, isCompleted: true } : f)) });
+  assert.equal(useAppStore.getState().appendFrog("fourth", "QUALITY").ok, true);
+});
+
+test("reorder moves a task within its anchor's group only", () => {
+  useAppStore.setState({
+    anchors: [anchor("A", 1), anchor("B", 2)],
+    frogs: [frog("a1", 1, { anchorId: "A" }), frog("a2", 2, { anchorId: "A" }), frog("b1", 3, { anchorId: "B" }), frog("free", 4)],
+  });
+  const ids = () => [...useAppStore.getState().frogs].sort((x, y) => x.order - y.order).map((f) => f.id);
+  useAppStore.getState().reorderFrog("a2", 0);
+  assert.deepEqual(ids(), ["a2", "a1", "b1", "free"]);
+  // Pushed past its group, it stops at the group's edge.
+  useAppStore.getState().reorderFrog("a2", 3);
+  assert.deepEqual(ids(), ["a1", "a2", "b1", "free"]);
+});
+
+test("closed days keep each task's anchor and rollover count", () => {
+  useAppStore.setState({
+    currentDay: "2026-10-01",
+    tomorrowFrogs: null,
+    anchors: [anchor("A", 1)],
+    frogs: [frog("a1", 1, { anchorId: "A", rolloverCount: 2 })],
+    frogHistory: [],
+  });
+  useAppStore.getState().rolloverIfNewDay();
+  const closed = useAppStore.getState().frogHistory[0].frogs[0];
+  assert.equal(closed.anchorId, "A");
+  assert.equal(closed.rolloverCount, 2);
+  assert.equal(useAppStore.getState().frogs[0].rolloverCount, 3);
 });

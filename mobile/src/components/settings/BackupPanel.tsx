@@ -1,13 +1,13 @@
 import React, { useState } from "react";
 import { View } from "react-native";
-import { applyBackup, exportBackup, pickBackup, summarizeBackup, type BackupFile } from "@/lib/backup";
+import { applyBackup, exportBackup, pickBackup, summarizeBackup, type Restorable } from "@/lib/backup";
 import { radius, useColors } from "@/theme";
 import { Button, Row, Txt } from "@/components/ui";
 
 /** Export and import use the web app's backup format, so data moves between web and phone. */
 export function BackupPanel() {
   const c = useColors();
-  const [pending, setPending] = useState<BackupFile["data"] | null>(null);
+  const [pending, setPending] = useState<Restorable | null>(null);
   const [message, setMessage] = useState<{ text: string; tone: "brand" | "danger" } | null>(null);
 
   const pick = async () => {

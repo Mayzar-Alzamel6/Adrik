@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { router } from "expo-router";
 import { Pressable, ScrollView, View } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { FAITH_VALUE_TEMPLATE, VALUE_TEMPLATES, customValue, useAppStore, type CoreValueItem } from "@/stores/useAppStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { weekOf } from "@/lib/utils";

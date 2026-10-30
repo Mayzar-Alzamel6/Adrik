@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { View } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { HIMMA_VERSES, useAppStore } from "@/stores/useAppStore";
 import { formatMinutes, toLocalDateString } from "@/lib/utils";
 import { ROW, radius, useColors } from "@/theme";

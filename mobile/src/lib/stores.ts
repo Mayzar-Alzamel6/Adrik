@@ -19,9 +19,17 @@ export const STORE_KEYS = {
 
 export type Slot = keyof typeof STORE_KEYS;
 
+/** Phone-only stores: never synced, but backed up under `phone` (the web app ignores that field). */
+export const PHONE_KEYS = {
+  focus: "adrik-mobile-focus-v1",
+  reminders: "adrik-mobile-reminders-v1",
+} as const;
+
+export type PhoneSlot = keyof typeof PHONE_KEYS;
+
 const ALL = { main: useAppStore, vault: useVaultStore, planner: usePlannerStore, projects: useProjectsStore, journey: useJourneyStore };
 
-// Every persisted store, including the phone-only ones (reminders, focus guard) that backups leave out.
+// Every persisted store, including the phone-only ones (reminders, focus guard) that are never synced.
 const HYDRATED = [...Object.values(ALL), useReminderStore, useFocusGuardStore];
 const allHydrated = () => HYDRATED.every((s) => s.persist.hasHydrated());
 const subscribeHydration = (onChange: () => void) => {
@@ -47,7 +55,7 @@ export async function resetEverything() {
 
 /** Reloads every store from its saved copy, e.g. after importing a backup. */
 export async function rehydrateAll() {
-  await Promise.all(Object.values(ALL).map((s) => s.persist.rehydrate()));
+  await Promise.all(HYDRATED.map((s) => s.persist.rehydrate()));
 }
 
 export const storeFor = (slot: Slot) => ALL[slot];

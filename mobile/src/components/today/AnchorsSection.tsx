@@ -1,18 +1,18 @@
 import React, { useState } from "react";
 import { Pressable, View } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
 import { MAX_ANCHORS, MAX_TASKS_PER_ANCHOR, useAppStore, type AnchorPriority } from "@/stores/useAppStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { successFeedback, warningFeedback } from "@/lib/feedback";
-import { ROW, useColors } from "@/theme";
-import { Button, Card, Chip, IconButton, Input, Label, LinkButton, Row, Sheet, Txt } from "@/components/ui";
+import { ROW, radius, useColors } from "@/theme";
+import { Button, Chip, IconButton, Input, Label, LinkButton, Row, Sheet, Txt } from "@/components/ui";
 
 /**
- * Up to three priorities that stay until closed by hand, each tied to one project.
- * Each day, tasks are pulled from the anchor's project; they appear in today's list under the anchor.
+ * Up to three priorities that stay until closed by hand, each tied to one project, folded into the head of
+ * today's priorities. Each day, tasks are pulled from the anchor's project; they appear in the list under the anchor.
  */
-export function AnchorsCard() {
+export function AnchorsSection() {
   const c = useColors();
   const anchors = useAppStore((s) => s.anchors);
   const frogs = useAppStore((s) => s.frogs);
@@ -22,28 +22,27 @@ export function AnchorsCard() {
   const [adding, setAdding] = useState(false);
   const [pullingId, setPullingId] = useState<string | null>(null);
   const [closingId, setClosingId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   const open = anchors.filter((a) => !a.closedAt).sort((a, b) => a.order - b.order);
   const pulling = open.find((a) => a.id === pullingId);
   const closing = open.find((a) => a.id === closingId);
 
   return (
-    <Card style={{ gap: 12 }}>
-      <Row style={{ justifyContent: "space-between" }}>
-        <View style={{ flex: 1 }}>
-          <Txt variant="title" weight="semibold">
-            🎯 الأولويات الثابتة
-          </Txt>
-          <Txt variant="small" color="ink3">
-            {open.length}/{MAX_ANCHORS} · تبقى كل يوم حتى تغلقها
-          </Txt>
-        </View>
-        {open.length < MAX_ANCHORS && projects.length > 0 ? (
-          <Button title="أولوية" icon="plus" size="sm" variant="secondary" onPress={() => setAdding(true)} />
-        ) : null}
-      </Row>
+    <View style={{ gap: 12, borderRadius: radius.md, borderWidth: 1, borderColor: c.line, padding: 12, marginTop: 10 }}>
+      <Pressable onPress={() => setExpanded(!expanded)} accessibilityRole="button" accessibilityState={{ expanded }}>
+        <Row style={{ justifyContent: "space-between" }}>
+          <View style={{ flex: 1 }}>
+            <Txt weight="semibold">🎯 الأولويات الثابتة</Txt>
+            <Txt variant="small" color="ink3">
+              {open.length ? open.map((a) => a.title).join(" · ") : `${open.length}/${MAX_ANCHORS} · تبقى كل يوم حتى تغلقها`}
+            </Txt>
+          </View>
+          <Feather name={expanded ? "chevron-up" : "chevron-down"} size={18} color={c.ink3} />
+        </Row>
+      </Pressable>
 
-      {projects.length === 0 ? (
+      {!expanded ? null : projects.length === 0 ? (
         <LinkButton title="أنشئ مشروعاً أولاً، ثم اجعله أولوية ثابتة" icon="folder" onPress={() => router.push("/tool/projects")} />
       ) : open.length === 0 ? (
         <Txt variant="ui" color="ink2">
@@ -92,6 +91,9 @@ export function AnchorsCard() {
           );
         })
       )}
+      {expanded && open.length < MAX_ANCHORS && projects.length > 0 ? (
+        <Button title="أولوية ثابتة" icon="plus" size="sm" variant="secondary" onPress={() => setAdding(true)} />
+      ) : null}
 
       <Sheet open={adding} onClose={() => setAdding(false)} title="أولوية ثابتة جديدة" description="مرتبطة بمشروع واحد، وتبقى حتى تغلقها بنفسك.">
         {adding ? <AddAnchor onDone={() => setAdding(false)} /> : null}
@@ -116,7 +118,7 @@ export function AnchorsCard() {
           </Row>
         ) : null}
       </Sheet>
-    </Card>
+    </View>
   );
 }
 

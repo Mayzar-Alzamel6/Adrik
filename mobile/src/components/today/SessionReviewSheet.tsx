@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { View } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { breakMinutesFor, useAppStore, type FocusSessionLog, type SessionOutcome } from "@/stores/useAppStore";
 import { fullSessions, minutesAr } from "@/lib/utils";
 import { radius, useColors } from "@/theme";

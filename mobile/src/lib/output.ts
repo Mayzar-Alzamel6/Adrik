@@ -1,8 +1,10 @@
 import type { FocusSessionLog, FrogDayRecord, FrogTask } from "@/stores/useAppStore";
+import { dayRecords } from "@/lib/completion";
 import type { RcaEntry } from "@/stores/useFocusGuardStore";
 import { lastDays } from "@/lib/habits";
 import { weekRange, toLocalDateString, type WeekRef } from "@/lib/utils";
 import {
+  DEEP_MIN_MINUTES,
   deepMinutesOn,
   type DistractionEvent,
   drainShare,
@@ -18,17 +20,6 @@ interface Data {
   frogHistory: FrogDayRecord[];
   currentDay: string;
   focusSessions: FocusSessionLog[];
-}
-
-/** Every planned day keyed by date: closed days from the history, today from the live list. */
-function days(data: Data) {
-  const map = new Map<string, FrogDayRecord["frogs"]>();
-  for (const d of data.frogHistory) map.set(d.date, d.frogs);
-  map.set(
-    data.currentDay,
-    data.frogs.map((f) => ({ ...f, completedAt: f.isCompleted ? f.completedAt ?? `${data.currentDay}T12:00:00` : undefined }))
-  );
-  return map;
 }
 
 function energyLookup(data: Data) {
@@ -50,16 +41,16 @@ export function deepMinutesSeries(data: Data, n: number) {
 }
 
 export function weekFrogRate(data: Data, dates: string[]) {
-  const map = days(data);
+  const map = dayRecords(data);
   return frogRate(dates.filter((d) => map.has(d)).map((date) => ({ date, frogs: map.get(date)! })));
 }
 
 /** The weekly load suggestion from the last seven days. */
 export function weeklyTuning(data: Data, rcaLog: RcaEntry[]) {
   const dates = lastDays(data.currentDay, 7);
-  const sessions = data.focusSessions.filter((s) => dates.includes(toLocalDateString(new Date(s.endedAt))));
+  const sessions = data.focusSessions.filter((s) => s.plannedMinutes >= DEEP_MIN_MINUTES && dates.includes(toLocalDateString(new Date(s.endedAt))));
   if (sessions.length < TUNING_MIN_SESSIONS) return "hold" as const;
-  const map = days(data);
+  const map = dayRecords(data);
   return tuningChange({
     completionRate: sessionCompletionRate(data.focusSessions, dates),
     rcaC: rcaLog.filter((r) => r.bug === "BUG_C" && dates.includes(r.date)).length,

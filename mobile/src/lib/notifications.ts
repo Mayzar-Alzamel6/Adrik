@@ -8,6 +8,7 @@ import type { DailyReminder } from "@/stores/useReminderStore";
  * replaces the previous one and cancelling never needs a stored id.
  */
 const IDS = {
+  /** Older builds scheduled the end alert under its own id; still cancelled so an update leaves none behind. */
   sessionEnd: "session-end",
   sessionOngoing: "session-ongoing",
   breakEnd: "break-end",
@@ -77,20 +78,25 @@ const mmss = (ms: number) => {
 
 /**
  * While a session runs: a sticky notification naming the task, and an alert at its end
- * even when the phone is locked or the app was closed.
+ * even when the phone is locked or the app was closed. The end alert reuses the sticky one's identifier,
+ * so it replaces it in the tray: no sticky notification is left behind if the app was killed.
  */
 export async function syncSessionEnd(endsAt: number | null, label: string) {
   if (!supported) return;
   if (!endsAt || endsAt <= Date.now()) {
+    await cancel(IDS.sessionEnd);
+    await cancel(IDS.sessionOngoing);
     await Notifications.dismissNotificationAsync(IDS.sessionOngoing).catch(() => {});
-    return cancel(IDS.sessionEnd);
+    return;
   }
-  await scheduleAt(IDS.sessionEnd, new Date(endsAt), `✅ انتهت جلسة: ${label || "التركيز"}`, "ارجع وسجّل ما أنجزته.");
+  if (!(await ensureNotificationPermission())) return;
+  await cancel(IDS.sessionEnd);
   await Notifications.scheduleNotificationAsync({
     identifier: IDS.sessionOngoing,
     content: { title: `🎯 ${label || "جلسة تركيز"}`, body: `تنتهي الساعة ${clock(endsAt)}`, sticky: true, autoDismiss: false },
     trigger: Platform.OS === "android" ? { channelId: CHANNEL } : null,
   });
+  await scheduleAt(IDS.sessionOngoing, new Date(endsAt), `✅ انتهت جلسة: ${label || "التركيز"}`, "ارجع وسجّل ما أنجزته.");
 }
 
 /** Leaving the app mid-session: three reminders to come back. The session keeps running meanwhile. */

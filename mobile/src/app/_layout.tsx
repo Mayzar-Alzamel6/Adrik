@@ -3,13 +3,10 @@ import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import {
-  IBMPlexSansArabic_400Regular,
-  IBMPlexSansArabic_500Medium,
-  IBMPlexSansArabic_600SemiBold,
-  IBMPlexSansArabic_700Bold,
-  useFonts,
-} from "@expo-google-fonts/ibm-plex-sans-arabic";
+import { useFonts } from "expo-font";
+// Per-weight entry points: the package index requires all seven weights, and the bundler ships every one it sees.
+import { IBMPlexSansArabic_400Regular } from "@expo-google-fonts/ibm-plex-sans-arabic/400Regular";
+import { IBMPlexSansArabic_600SemiBold } from "@expo-google-fonts/ibm-plex-sans-arabic/600SemiBold";
 import { useAppStore } from "@/stores/useAppStore";
 import { useStoresHydrated } from "@/lib/stores";
 import { useColors } from "@/theme";
@@ -20,9 +17,7 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
     IBMPlexSansArabic_400Regular,
-    IBMPlexSansArabic_500Medium,
     IBMPlexSansArabic_600SemiBold,
-    IBMPlexSansArabic_700Bold,
   });
   const hydrated = useStoresHydrated();
   const ready = (fontsLoaded || Boolean(fontError)) && hydrated;

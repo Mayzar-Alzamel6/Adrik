@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Pressable, View } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { useAppStore } from "@/stores/useAppStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import {

@@ -50,6 +50,9 @@ export interface AnchorPriority {
 
 export const MAX_ANCHORS = 3;
 export const MAX_TASKS_PER_ANCHOR = 3;
+/** Open tasks on today's list, anchored or not: the rule of three holds for the whole day. */
+export const MAX_OPEN_TODAY = 3;
+const FULL_DAY = "لديك ثلاث مهام مفتوحة اليوم. أنجز واحدة أولاً، أو أرسل هذه إلى صندوق المهام.";
 
 /** Groups today's list under the anchors in their order (unanchored last), so the first task of anchor #1 is the frog. */
 export function groupByAnchor<T extends { order: number; anchorId?: string }>(frogs: T[], anchors: AnchorPriority[]): T[] {
@@ -72,6 +75,8 @@ export interface FrogDayRecord {
     isRerouted?: boolean;
     isDropped?: boolean;
     dropReason?: string;
+    anchorId?: string;
+    rolloverCount?: number;
   })[];
 }
 
@@ -930,7 +935,7 @@ export const useAppStore = create<AppState>()(
 
           const closedDay: FrogDayRecord = {
             date: state.currentDay,
-            frogs: state.frogs.map(({ id, title, order, isCompleted, completedAt, projectId, skillId, category, energyTag, definitionOfDone, isRerouted, isDropped, dropReason }) => ({
+            frogs: state.frogs.map(({ id, title, order, isCompleted, completedAt, projectId, skillId, category, energyTag, definitionOfDone, isRerouted, isDropped, dropReason, anchorId, rolloverCount }) => ({
               id,
               title,
               order,
@@ -943,6 +948,8 @@ export const useAppStore = create<AppState>()(
               ...(isRerouted ? { isRerouted } : {}),
               ...(isDropped ? { isDropped } : {}),
               ...(dropReason ? { dropReason } : {}),
+              ...(anchorId ? { anchorId } : {}),
+              ...(rolloverCount ? { rolloverCount } : {}),
             })),
           };
 
@@ -1004,7 +1011,8 @@ export const useAppStore = create<AppState>()(
         if (from < 0) return;
         const [moved] = list.splice(from, 1);
         list.splice(Math.max(0, Math.min(toIndex, list.length)), 0, moved);
-        set({ frogs: list.map((f, i) => ({ ...f, order: i + 1 })) });
+        // A task moves within its anchor's group only; grouping snaps a move past the group back to its edge.
+        set({ frogs: groupByAnchor(list.map((f, i) => ({ ...f, order: i + 1 })), get().anchors) });
       },
       frogs: INITIAL_FROGS,
       previousFrogs: null,
@@ -1029,9 +1037,7 @@ export const useAppStore = create<AppState>()(
       },
       appendFrog: (title, category, links = {}) => {
         const frogs = get().frogs;
-        if (frogs.filter((f) => !f.isCompleted && !f.isDropped && !f.anchorId).length >= 3) {
-          return { ok: false, message: "لديك ثلاث أولويات مفتوحة. أنجز واحدة أولاً، أو أرسل هذه إلى صندوق المهام." };
-        }
+        if (frogs.filter((f) => !f.isCompleted && !f.isDropped).length >= MAX_OPEN_TODAY) return { ok: false, message: FULL_DAY };
         const id = `frog-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const frog: FrogTask = {
           id,
@@ -1089,6 +1095,7 @@ export const useAppStore = create<AppState>()(
         if (state.frogs.some((f) => f.projectTaskId === taskId && !f.isCompleted && !f.isDropped)) {
           return { ok: false, message: "هذه المهمة ضمن اليوم بالفعل." };
         }
+        if (state.frogs.filter((f) => !f.isCompleted && !f.isDropped).length >= MAX_OPEN_TODAY) return { ok: false, message: FULL_DAY };
         if (state.frogs.filter((f) => f.anchorId === anchorId && !f.isCompleted && !f.isDropped).length >= MAX_TASKS_PER_ANCHOR) {
           return { ok: false, message: `${MAX_TASKS_PER_ANCHOR} مهام مفتوحة تحت هذه الأولوية. أنجز واحدة أولاً.` };
         }

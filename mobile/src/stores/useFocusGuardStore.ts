@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { FocusTimerMode } from "@/stores/useAppStore";
+import { useAppStore, type FocusTimerMode } from "@/stores/useAppStore";
 import { applyTuning, type DistractionEvent, type DistractionKind, type DistractionTrigger, type TuningChange } from "@/lib/focusGuard";
 import { toLocalDateString } from "@/lib/utils";
 
@@ -18,6 +18,10 @@ export interface ResumableBlock {
 }
 
 interface FocusGuardState {
+  /** The block's work happens on the phone. Off the phone (a book, paper, the PC), leaving the app is not a slip. */
+  onPhone: boolean;
+  setOnPhone: (on: boolean) => void;
+
   // Away from the app during a session
   sessionExits: number;
   awaySince: number | null;
@@ -48,6 +52,8 @@ interface FocusGuardState {
   /** The kickoff block is running for this slip. */
   kickoffActive: boolean;
   setKickoffActive: (on: boolean) => void;
+  /** After the kickoff: run the block it cut short with the time it had left, or a fresh 45 if none was saved. */
+  resumeAfterKickoff: (fallbackCommitment: string) => void;
 
   /** The smallest next step written for each task, offered again next time. */
   nextSteps: Record<string, string>;
@@ -80,6 +86,9 @@ const newId = () => `dx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
 export const useFocusGuardStore = create<FocusGuardState>()(
   persist(
     (set, get) => ({
+      onPhone: false,
+      setOnPhone: (onPhone) => set({ onPhone }),
+
       sessionExits: 0,
       awaySince: null,
       noteLeft: () => set({ awaySince: Date.now(), sessionExits: get().sessionExits + 1 }),
@@ -126,6 +135,14 @@ export const useFocusGuardStore = create<FocusGuardState>()(
       setResumable: (resumable) => set({ resumable }),
       kickoffActive: false,
       setKickoffActive: (kickoffActive) => set({ kickoffActive }),
+      resumeAfterKickoff: (fallbackCommitment) => {
+        const r = get().resumable;
+        set({ kickoffActive: false, resumable: null });
+        const app = useAppStore.getState();
+        if (r) useAppStore.setState({ focusMode: r.mode, focusSecondsRemaining: r.secondsLeft });
+        else app.resetFocus("WORK_45");
+        useAppStore.getState().startFocus(r?.commitment || fallbackCommitment);
+      },
 
       nextSteps: {},
       setNextStep: (taskId, step) => set({ nextSteps: { ...get().nextSteps, [taskId]: step.trim() } }),

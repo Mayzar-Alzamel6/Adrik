@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { isCrisis, type AiConsent } from "@/lib/safety/analysis";
 import { isEmptyWeek, localReview } from "@/lib/ai/coach";
 import { askReview, coachAccess } from "@/lib/ai/coachClient";

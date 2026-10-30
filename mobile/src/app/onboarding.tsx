@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Pressable, View } from "react-native";
 import { Redirect, router } from "expo-router";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import {
   FAITH_VALUE_TEMPLATE,
   FOCUS_AREAS,

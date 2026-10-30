@@ -1,6 +1,6 @@
 import React from "react";
 import { Pressable, View } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
 import { useColors, type ColorName } from "@/theme";
 import { TOOL_GROUPS } from "@/lib/tools";

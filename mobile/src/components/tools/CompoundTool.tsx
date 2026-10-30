@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { router } from "expo-router";
 import { View } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { useAppStore } from "@/stores/useAppStore";
 import { formatMinutes, projectMinutesSince, useValueData } from "@/lib/valueInsights";
 import { radius, useColors } from "@/theme";

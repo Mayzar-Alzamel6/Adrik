@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Linking, Platform, View } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
 import { EXTERNAL_INTERRUPTION, useAppStore, type FocusTimerMode } from "@/stores/useAppStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
@@ -59,7 +59,6 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
     breakMinutes,
     lastBreakEndedAt,
     breakOffer,
-    distractions,
     focusStreakAtRisk,
     deepSessionNudgeDone,
     answerDeepSessionNudge,
@@ -124,6 +123,20 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
   const canLink = hasProjects || hasSkills;
   const fullShortSessions = focusSessions.filter((f) => f.completed && f.plannedMinutes < 90).length;
   const showDeepNudge = !deepSessionNudgeDone && focusMode !== "WORK_90" && fullShortSessions >= DEEP_NUDGE_AFTER;
+  // One idle banner at a time, the most urgent first, so the start button stays in reach.
+  const banner = kickoffDone
+    ? "kickoff"
+    : endedEarly
+      ? "endedEarly"
+      : showEnough
+        ? "enough"
+        : breakOffer
+          ? "breakOffer"
+          : breakJustEnded
+            ? "breakEnded"
+            : showDeepNudge
+              ? "nudge"
+              : null;
   const resolveLineage = useLineageResolver();
   const servedValues = current ? resolveLineage(current).values : [];
   const allDone = frogs.length > 0 && frogs.every((f) => f.isCompleted);
@@ -329,7 +342,7 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
           </>
         ) : (
           <>
-            {breakOffer ? (
+            {banner === "breakOffer" && breakOffer ? (
               <View style={{ borderRadius: radius.md, backgroundColor: c.brandSoft, padding: 14, gap: 10 }}>
                 <Txt variant="ui" align="center">
                   أنجزت «{breakOffer.frogTitle}». استراحة {minutesAr(breakOffer.minutes)} تناسب جلستك.
@@ -339,13 +352,13 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
                   <Button title="لاحقاً" variant="ghost" size="sm" onPress={s.dismissBreakOffer} />
                 </Row>
               </View>
-            ) : breakJustEnded ? (
+            ) : banner === "breakEnded" ? (
               <Txt variant="ui" weight="medium" color="brand" align="center">
                 انتهت الاستراحة. جاهز للجلسة التالية؟
               </Txt>
             ) : null}
 
-            {showDeepNudge && !breakOffer && !endedEarly ? (
+            {banner === "nudge" ? (
               <View style={{ borderRadius: radius.md, backgroundColor: c.accentSoft, padding: 14, gap: 10 }}>
                 <Row gap={8} style={{ alignItems: "flex-start" }}>
                   <Feather name="trending-up" size={16} color={c.accentStrong} style={{ marginTop: 4 }} />
@@ -360,7 +373,7 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
               </View>
             ) : null}
 
-            {endedEarly ? (
+            {banner === "endedEarly" ? (
               <View style={{ borderRadius: radius.md, backgroundColor: c.surface2, padding: 14, gap: 10 }}>
                 <Txt variant="ui" align="center">
                   سجّلناها كما هي.
@@ -387,7 +400,7 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
               </View>
             ) : null}
 
-            {kickoffDone ? (
+            {banner === "kickoff" ? (
               <View style={{ borderRadius: radius.md, backgroundColor: c.brandSoft, padding: 14, gap: 10 }}>
                 <Txt variant="ui" weight="medium" align="center">
                   أقلعت. أكمل الكتلة الأصلية؟
@@ -397,14 +410,7 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
                     title={guard.resumable ? `نعم · باقي ${formatTime(guard.resumable.secondsLeft)}` : "نعم · كتلة كاملة"}
                     icon="play"
                     size="sm"
-                    onPress={() => {
-                      const r = guard.resumable;
-                      guard.setKickoffActive(false);
-                      guard.setResumable(null);
-                      if (r) useAppStore.setState({ focusMode: r.mode, focusSecondsRemaining: r.secondsLeft });
-                      else s.resetFocus("WORK_45");
-                      useAppStore.getState().startFocus(r?.commitment || current?.definitionOfDone || current?.title || "");
-                    }}
+                    onPress={() => guard.resumeAfterKickoff(current?.definitionOfDone || current?.title || "")}
                   />
                   <Button
                     title="لاحقاً"
@@ -419,7 +425,7 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
               </View>
             ) : null}
 
-            {showEnough ? (
+            {banner === "enough" ? (
               <View style={{ borderRadius: radius.md, backgroundColor: c.accentSoft, padding: 14, gap: 10 }}>
                 <Txt variant="ui" weight="medium" align="center">
                   اكتفيت: {deepToday} كتل عميقة اليوم. ما بعدها صيانة خفيفة أو راحة، لا كتلة عميقة جديدة.
@@ -434,7 +440,7 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
             <Segmented<FocusTimerMode>
               value={focusMode}
               onChange={(v) => s.resetFocus(v)}
-              options={MODES.map((m) => ({ value: m.value, label: m.label }))}
+              options={MODES.filter((m) => m.value !== "KICKOFF_10" || focusMode === "KICKOFF_10").map((m) => ({ value: m.value, label: m.label }))}
             />
 
             {/* Preflight Contract Inputs */}
@@ -492,6 +498,17 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
                     </Row>
                   </View>
                 ) : null}
+                <Segmented<"off" | "on">
+                  value={guard.onPhone ? "on" : "off"}
+                  onChange={(v) => guard.setOnPhone(v === "on")}
+                  options={[
+                    { value: "off", label: "📖 خارج الهاتف" },
+                    { value: "on", label: "📱 على الهاتف" },
+                  ]}
+                />
+                <Txt variant="small" color="ink3" align="center">
+                  {guard.onPhone ? "الخروج من التطبيق أثناء الكتلة يُذكّرك بالعودة." : "اقفل الهاتف بحرية: لا تذكيرات، فقط تنبيه النهاية."}
+                </Txt>
                 {showDnd ? (
                   <Button title="🔕 فعّل «لا تزعجني» قبل البدء" variant="secondary" size="sm" onPress={openDnd} />
                 ) : null}

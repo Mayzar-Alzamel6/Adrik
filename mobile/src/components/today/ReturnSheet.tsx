@@ -3,7 +3,7 @@ import { View } from "react-native";
 import { router } from "expo-router";
 import { useAppStore } from "@/stores/useAppStore";
 import { useFocusGuardStore } from "@/stores/useFocusGuardStore";
-import { DISTRACTION_KINDS, escalationFor, KICKOFF_MINUTES, type DistractionKind } from "@/lib/focusGuard";
+import { DISTRACTION_KINDS, escalationFor, KICKOFF_MINUTES, slipsForEscalation, type DistractionKind } from "@/lib/focusGuard";
 import { tapFeedback } from "@/lib/feedback";
 import { toLocalDateString } from "@/lib/utils";
 import { ROW, radius, useColors } from "@/theme";
@@ -36,16 +36,18 @@ export function ReturnSheet() {
 
 function Steps() {
   const c = useColors();
-  const guard = useFocusGuardStore();
-  const app = useAppStore();
-  const current = app.getCurrentFrog();
+  // Selectors, not the whole stores: the focus timer changes the app store every second.
+  const guard = useFocusGuardStore.getState();
+  const distractions = useFocusGuardStore((s) => s.distractions);
+  const app = useAppStore.getState();
+  const isFocusRunning = useAppStore((s) => s.isFocusRunning);
+  const current = useAppStore((s) => s.getCurrentFrog());
   const [step, setStep] = useState<Step>(1);
   const [kind, setKind] = useState<DistractionKind | null>(null);
   const [note, setNote] = useState("");
   const [nextStep, setNextStep] = useState(() => (current ? guard.nextSteps[current.id] ?? "" : ""));
 
-  const slipsToday = guard.distractions.filter((e) => e.date === toLocalDateString()).length;
-  const escalation = escalationFor(slipsToday);
+  const escalation = escalationFor(slipsForEscalation(distractions, toLocalDateString()));
 
   const pick = (k: DistractionKind) => {
     tapFeedback();
@@ -65,7 +67,7 @@ function Steps() {
   const finish = (startKickoff: boolean) => {
     if (current && nextStep.trim()) guard.setNextStep(current.id, nextStep);
     guard.closeRecovery(true);
-    if (!startKickoff || app.isFocusRunning || !current) return;
+    if (!startKickoff || isFocusRunning || !current) return;
     useAppStore.getState().resetFocus("KICKOFF_10");
     guard.setKickoffActive(true);
     useAppStore.getState().startFocus(nextStep.trim() || current.definitionOfDone || current.title);
@@ -73,12 +75,12 @@ function Steps() {
 
   const shorten = () => {
     guard.closeRecovery(true);
-    if (!app.isFocusRunning) app.resetFocus("WORK_45");
+    if (!isFocusRunning) app.resetFocus("WORK_45");
   };
 
   const recharge = () => {
     guard.closeRecovery(true);
-    if (!app.isFocusRunning) app.startBreak(20);
+    if (!isFocusRunning) app.startBreak(20);
   };
 
   return (
@@ -96,7 +98,7 @@ function Steps() {
               ? "التشتت الثالث اليوم: الحمل أثقل من طاقتك الآن. خفّفه."
               : "تشتت متكرر اليوم: طاقتك تحتاج شحناً قبل أي كتلة."}
           </Txt>
-          {app.isFocusRunning ? null : escalation === "shorten" ? (
+          {isFocusRunning ? null : escalation === "shorten" ? (
             <Button title="قصّر الكتلة إلى 45 دقيقة" icon="scissors" size="sm" variant="secondary" onPress={shorten} />
           ) : (
             <Button title="🔋 شحن 20 دقيقة" size="sm" variant="secondary" onPress={recharge} />
@@ -148,7 +150,7 @@ function Steps() {
               <Txt variant="ui" color="ink2">
                 التعب لا يُقاوَم بالإرادة. استراحة قصيرة بعيداً عن الشاشة، ثم تعود.
               </Txt>
-              {app.isFocusRunning ? (
+              {isFocusRunning ? (
                 <Button title="تابع" onPress={() => setStep(3)} />
               ) : (
                 <Button
@@ -193,7 +195,7 @@ function Steps() {
       {step === 4 ? (
         <View style={{ gap: 10 }}>
           <Label>4 · ابدأ الآن</Label>
-          {app.isFocusRunning ? (
+          {isFocusRunning ? (
             <>
               <Txt variant="ui" color="ink2">
                 جلستك ما زالت تعمل. نفّذ: «{nextStep.trim()}».

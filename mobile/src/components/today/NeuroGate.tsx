@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Animated, Easing, Modal, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { useAppStore } from "@/stores/useAppStore";
 import { useLineageResolver } from "@/lib/lineage";
 import { successFeedback, tapFeedback } from "@/lib/feedback";

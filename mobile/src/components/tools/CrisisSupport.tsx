@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Linking, Pressable, View } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { radius, useColors } from "@/theme";
 import { Button, Card, Row, Txt } from "@/components/ui";
 import { helplinesFor } from "@/lib/safety/helplines";

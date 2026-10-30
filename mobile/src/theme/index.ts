@@ -55,11 +55,12 @@ export function useColors(): Palette {
   return palette[mode];
 }
 
+// Two weights ship with the app; medium and bold map to the nearer emphasis weight.
 export const fonts = {
   regular: "IBMPlexSansArabic_400Regular",
-  medium: "IBMPlexSansArabic_500Medium",
+  medium: "IBMPlexSansArabic_600SemiBold",
   semibold: "IBMPlexSansArabic_600SemiBold",
-  bold: "IBMPlexSansArabic_700Bold",
+  bold: "IBMPlexSansArabic_600SemiBold",
 } as const;
 
 export const radius = { sm: 10, md: 14, lg: 20, xl: 28, full: 999 } as const;

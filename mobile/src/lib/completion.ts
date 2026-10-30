@@ -29,7 +29,7 @@ export function canActivateDrain(frogs: FrogTask[], targetId?: string): boolean 
 }
 
 /** One record per day: closed days from the history, today from the live list. */
-function dayRecords(data: Data): Map<string, DayFrog[]> {
+export function dayRecords(data: Pick<Data, "frogs" | "frogHistory" | "currentDay">): Map<string, DayFrog[]> {
   const map = new Map<string, DayFrog[]>();
   for (const d of data.frogHistory) if (d.date !== data.currentDay) map.set(d.date, d.frogs);
   map.set(

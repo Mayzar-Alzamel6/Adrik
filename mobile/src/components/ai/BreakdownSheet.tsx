@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { useAppStore } from "@/stores/useAppStore";
 import { useProjectsStore, type Project } from "@/stores/useProjectsStore";
 import { isCrisis } from "@/lib/safety/analysis";

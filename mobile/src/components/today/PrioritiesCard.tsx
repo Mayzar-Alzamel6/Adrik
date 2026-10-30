@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Pressable, View } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
 import { useAppStore, type EnergyTaxonomy, type FrogTask } from "@/stores/useAppStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { canActivateDrain } from "@/lib/completion";
@@ -10,6 +10,7 @@ import { Button, Card, IconButton, Input, Label, Row, Sheet, Txt } from "@/compo
 import { FrogLinkButton, FrogLinkSheet, LineageLine } from "@/components/today/FrogLinkSheet";
 import { ProjectPrioritySheet } from "@/components/today/ProjectPrioritySheet";
 import { AgileRerouteModal } from "@/components/today/AgileRerouteModal";
+import { AnchorsSection } from "@/components/today/AnchorsSection";
 
 function currentFrogOf(frogs: FrogTask[], activeFrogId: string | null) {
   const active = activeFrogId ? frogs.find((f) => f.id === activeFrogId && !f.isCompleted && !f.isDropped) : undefined;
@@ -342,6 +343,8 @@ export function PrioritiesCard() {
           </Row>
         </Row>
       </View>
+
+      <AnchorsSection />
 
       {/* Notice Callout */}
       {notice ? (
