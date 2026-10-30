@@ -1,0 +1,177 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id              String           @id @default(uuid())
+  email           String           @unique
+  name            String?
+  constitution    CoreValue[]
+  dailyLogs       DailyLog[]
+  tasks           Task[]
+  timeEntries     TimeEntry[]
+  events          Event[]
+  cbtLogs         CbtLog[]
+  vaultItems      DelayVaultItem[]
+  weeklyAudits    WeeklyAudit[]
+  skills          SkillProject[]
+  symbolismLogs   SymbolismLog[]
+  createdAt       DateTime         @default(now())
+}
+
+model CoreValue {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String   // مثل: الأمان والاستقرار، الإتقان والنمو
+  definition      String
+  dailyAction     String   // السلوك اليومي المثبت
+  redLine         String   // الخط الأحمر المخالف
+  order           Int      @default(0)
+}
+
+model Task {
+  id              String      @id @default(uuid())
+  userId          String
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String
+  date            DateTime
+  isTopPriority   Boolean     @default(false) // واحدة من أولويات الضفادع الـ 3
+  priorityOrder   Int?        // 1, 2, 3
+  category        String      // EMERGENCY, QUALITY, DELEGATE, ESCAPE
+  isCompleted     Boolean     @default(false)
+  timeEntries     TimeEntry[]
+  createdAt       DateTime    @default(now())
+}
+
+model TimeEntry {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  taskId          String?
+  task            Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  dailyLogId      String?
+  dailyLog        DailyLog? @relation(fields: [dailyLogId], references: [id], onDelete: SetNull)
+  category        String    // EMERGENCY, QUALITY, DELEGATE, ESCAPE
+  durationMinutes Int
+  startTime       DateTime
+  endTime         DateTime
+  notes           String?
+  createdAt       DateTime  @default(now())
+}
+
+model Event {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  date        DateTime
+  time        String?  // e.g. "10:30"
+  location    String?
+  notes       String?
+  isMandatory Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+model DailyLog {
+  id               String      @id @default(uuid())
+  userId           String
+  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date             DateTime
+  neuroGatePassed  Boolean     @default(false)
+  deepWorkMinutes  Int         @default(0)
+  escapeMinutes    Int         @default(0)
+  identityVote     String?     // تصويت الهوية المكتوب
+  evening4x3       String?     // JSON: { gratitudes: [3], cravings: [3], resentments: [3], fears: [3] }
+  digitalDetox     Boolean     @default(false)
+  scoreRatio       Float       @default(0.0) // نسبة الالتزام لليوم
+  binaryChecklist     String?     // JSON للبنود الثنائية اليومية (1/0)
+  quranicHimmaShown   String?     // آية الهمة المعروضة اليوم
+  fourGatesGuarded    String?     // JSON: { khatarat: Boolean, nazharat: Boolean, lafadhat: Boolean, khotuwat: Boolean }
+  randomRewardWon     Boolean     @default(false)
+  bufferTimeRespected Boolean     @default(true)
+  eveningCommitted    Boolean     @default(false) // تأكيد وإغلاق التخطيط المسائي
+  timeEntries         TimeEntry[]
+  createdAt           DateTime    @default(now())
+}
+
+model DelayVaultItem {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  impulseTitle     String
+  cravingIntensity Int      @default(5) // Scale 0-10
+  delayHours       Int      // 2 أو 24
+  unlockTime       DateTime
+  isResolved       Boolean  @default(false)
+  surfingCompleted Boolean  @default(false) // بروتوكول تصفح الموجة وتدريب التنفس 4-4-6
+  actionTaken      String?  // هل نفذ النزوة أم تراجع عنها
+  createdAt        DateTime @default(now())
+}
+
+model WeeklyAudit {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  weekNumber       Int      // 1 to 52
+  year             Int
+  escapeHoursTotal Float
+  willpowerLeaks   Int      @default(0) // تسريب الإرادة: مجموع مرات (الجدال/المماراة + الاسترسال في الحزن + جلد الذات)
+  actionLevel      Int      // 1 (لا فعل) إلى 4 (فعل هائل)
+  colorStatus      String   // GREEN, AMBER, RED
+  rewardClaimed    Boolean  @default(false)
+  notes            String?
+  createdAt        DateTime @default(now())
+}
+
+model CbtLog {
+  id                 String   @id @default(uuid())
+  userId             String
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event              String
+  automaticThought   String
+  emotion            String
+  bodyLocation       String?
+  distortionType     String?  // نوع التشويه المكتشف بـ AI
+  reframedThought    String?  // الفكرة البديلة المقترحة من AI
+  nextSmallAction    String?  // الفعل الصحيح التالي
+  createdAt          DateTime @default(now())
+}
+
+model SkillProject {
+  id          String         @id @default(uuid())
+  userId      String
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String         // e.g., "German B1 Mastery", "Shopify Store Operations"
+  targetHours Int            @default(20) // 20-hour rule
+  isLocked    Boolean        @default(true) // Anti Method-Hopping Lock
+  lockEndDate DateTime?
+  elements    SkillElement[]
+  createdAt   DateTime       @default(now())
+}
+
+model SkillElement {
+  id          String       @id @default(uuid())
+  projectId   String
+  project     SkillProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  category    String       // "CONCEPT", "FACT", "PROCEDURE"
+  content     String
+  isMastered  Boolean      @default(false)
+}
+
+model SymbolismLog {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  escapeActivity  String   // e.g., "YouTube Reels, Shopping, Sleeping without fatigue"
+  avoidedEmotion  String   // e.g., "Fear of Failure, Sense of Inadequacy, Boredom, Isolation"
+  rootMeaning     String   // What narrative or early memory did this ritual invoke?
+  correctiveStep  String   // The next smallest conscious action
+  createdAt       DateTime @default(now())
+}
+

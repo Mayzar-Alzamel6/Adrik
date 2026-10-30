@@ -1,0 +1,359 @@
+/**
+ * The coach: turns a vague goal into small steps, and a week's numbers into an honest review.
+ * Pure on purpose (relative imports only, no React, no storage) so the computer's server routes, the phone,
+ * the Supabase function and `node --test` all share the same prompts, safety order, reply checks and local fallback.
+ * The same file lives in adrik-personal and adrik-mobile; the Supabase function gets a generated copy
+ * (`node scripts/copy-coach.mjs`). Edit it here only.
+ */
+import { AI_RISK_INSTRUCTION, isCrisis } from "../safety/analysis";
+
+/* ---------- Limits ---------- */
+
+const TASK_MAX = 140; // same as the project task input
+const clip = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.round(v)) : 0);
+const list = <T>(v: unknown, max: number, map: (x: unknown) => T | null): T[] =>
+  Array.isArray(v) ? v.slice(0, max).map(map).filter((x): x is T => x !== null) : [];
+const sameTitle = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/* ---------- 1. Goal breakdown ---------- */
+
+export interface BreakdownInput {
+  /** "new": a vague goal becomes a project; "project": next steps for an existing one. */
+  mode: "new" | "project";
+  goal: string;
+  details?: string;
+  values: { id: string; title: string }[];
+  /** Open tasks already in the project, so nothing is suggested twice. */
+  existingTasks: string[];
+  doneTasks: string[];
+}
+
+export interface Breakdown {
+  projectName: string;
+  description: string;
+  valueIds: string[];
+  tasks: string[];
+  /** The smallest start, 25 minutes or less, meant for today. */
+  firstStep: string;
+}
+
+export type BreakdownReply =
+  | { status: "crisis" }
+  /** No AI here: no key on the server, or the person chose local only. */
+  | { status: "unavailable" }
+  | { status: "failed" }
+  | { status: "ok"; breakdown: Breakdown };
+
+export function sanitizeBreakdownInput(raw: unknown): BreakdownInput {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const title = (x: unknown) => clip(x, TASK_MAX) || null;
+  return {
+    mode: r.mode === "project" ? "project" : "new",
+    goal: clip(r.goal, 500),
+    details: clip(r.details, 1000) || undefined,
+    values: list(r.values, 12, (v) => {
+      const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+      const id = clip(o.id, 80);
+      const t = clip(o.title, 60);
+      return id && t ? { id, title: t } : null;
+    }),
+    existingTasks: list(r.existingTasks, 40, title),
+    doneTasks: list(r.doneTasks, 20, title),
+  };
+}
+
+export function breakdownPrompt(input: BreakdownInput): string {
+  const intro =
+    input.mode === "new"
+      ? "حوّل هدفه الضبابي إلى مشروع واضح: اسم قصير، ووصف في جملة، ومهام صغيرة."
+      : "المشروع موجود؛ اقترح المهام التالية فقط، دون تكرار ما هو موجود أو منجز.";
+  return `أنت مهندس نظم ومصمم معماري للتنفيذ في تطبيق «أدرك عمرك» (نمط INTJ-A). مهمتك تفكيك الأهداف إلى وحدات تنفيذية مباشرة ومحددة دون حشو نظري أو عاطفي.
+${intro}
+
+${AI_RISK_INSTRUCTION}
+
+القواعد:
+- من 3 إلى 7 مهام. كل مهمة تبدأ بفعل ملموس، وتُنجز في جلسة تركيز واحدة (25 إلى 90 دقيقة)، وأقل من 12 كلمة.
+- "firstStep": أصغر خطوة يمكن البدء بها اليوم في 25 دقيقة أو أقل، تبدأ بفعل. ليست تكراراً لإحدى المهام.
+- "valueIds": اختر من قائمة القيم المعرّفات التي يخدمها الهدف فعلاً فقط (من 0 إلى 2)، ولا تخترع معرّفات.
+- لا تعِد بنتائج، ولا تقدّم نصيحة مالية أو استثمارية أو طبية شخصية.
+- العربية البسيطة فقط.
+
+أعد JSON فقط بهذا الشكل دون أي نص آخر:
+{"risk": false, "projectName": "", "description": "", "valueIds": [], "tasks": [""], "firstStep": ""}
+
+الهدف: ${input.goal}
+${input.details ? `تفاصيل: ${input.details}\n` : ""}قيم المستخدم: ${JSON.stringify(input.values)}
+مهام موجودة: ${JSON.stringify(input.existingTasks)}
+مهام منجزة: ${JSON.stringify(input.doneTasks)}`;
+}
+
+/**
+ * Reads the AI's reply. Anything but an explicit `risk: false` is a crisis;
+ * null means unusable. Value ids are kept only when they are the person's own,
+ * and tasks already in the project are dropped.
+ */
+export function readBreakdown(
+  parsed: unknown,
+  ctx: { valueIds: string[]; existing: string[] }
+): { risk: true } | ({ risk: false } & Breakdown) | null {
+  if (!parsed || typeof parsed !== "object") return null;
+  const p = parsed as Record<string, unknown>;
+  if (p.risk !== false) return { risk: true };
+
+  const firstStep = clip(p.firstStep, TASK_MAX);
+  const tasks: string[] = [];
+  for (const t of list(p.tasks, 10, (x) => clip(x, TASK_MAX) || null)) {
+    if (tasks.length >= 7) break;
+    if ([...tasks, ...ctx.existing].some((e) => sameTitle(e, t)) || sameTitle(t, firstStep)) continue;
+    tasks.push(t);
+  }
+  if (!firstStep || tasks.length === 0) return null;
+
+  const valueIds = [...new Set(list(p.valueIds, 4, (x) => clip(x, 80) || null))].filter((id) => ctx.valueIds.includes(id)).slice(0, 2);
+  return {
+    risk: false,
+    projectName: clip(p.projectName, 80),
+    description: clip(p.description, 300),
+    valueIds,
+    tasks,
+    firstStep,
+  };
+}
+
+/* ---------- 2. Weekly review ---------- */
+
+/** Numbers and titles only: never notes, thoughts or journal text. */
+export interface WeekSummary {
+  weekLabel: string;
+  /** The week is still running; the review talks about the rest of it, not "next week". */
+  isCurrentWeek: boolean;
+  daysElapsed: number;
+  priorities: { planned: number; done: number; rate: number | null; daysWithPlan: number };
+  focus: {
+    minutes: number;
+    /** Minutes whose priority reached a value through its project. */
+    linkedMinutes: number;
+    sessions: number;
+    completed: number;
+    earlyExits: number;
+    /** Outside interruptions: never a slip. */
+    interruptions: number;
+    /** What the person wrote when ending early (short, checked by the crisis detector first). */
+    exitReasons: string[];
+  };
+  values: { title: string; minutes: number; prioritiesDone: number; habitsDone: number }[];
+  neglectedValues: string[];
+  projects: { name: string; minutes: number; progress: number }[];
+  skills: { title: string; minutes: number }[];
+  habits: { title: string; done: number; due: number; streak: number; atRisk: boolean; minimum?: string }[];
+}
+
+export interface CoachReview {
+  observations: string[];
+  suggestion: { title: string; why: string };
+}
+
+export type ReviewReply = { status: "crisis" } | { status: "ok"; review: CoachReview; engine: "ai" | "local" };
+
+export function sanitizeWeekSummary(raw: unknown): WeekSummary {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const obj = (v: unknown) => (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  const pr = obj(r.priorities);
+  const fo = obj(r.focus);
+  const rate = typeof pr.rate === "number" && Number.isFinite(pr.rate) ? Math.min(100, num(pr.rate)) : null;
+  return {
+    weekLabel: clip(r.weekLabel, 80),
+    isCurrentWeek: r.isCurrentWeek === true,
+    daysElapsed: Math.min(7, Math.max(1, num(r.daysElapsed))),
+    priorities: { planned: num(pr.planned), done: num(pr.done), rate, daysWithPlan: num(pr.daysWithPlan) },
+    focus: {
+      minutes: num(fo.minutes),
+      linkedMinutes: num(fo.linkedMinutes),
+      sessions: num(fo.sessions),
+      completed: num(fo.completed),
+      earlyExits: num(fo.earlyExits),
+      interruptions: num(fo.interruptions),
+      exitReasons: list(fo.exitReasons, 10, (x) => clip(x, 120) || null),
+    },
+    values: list(r.values, 12, (v) => {
+      const o = obj(v);
+      const title = clip(o.title, 60);
+      return title ? { title, minutes: num(o.minutes), prioritiesDone: num(o.prioritiesDone), habitsDone: num(o.habitsDone) } : null;
+    }),
+    neglectedValues: list(r.neglectedValues, 12, (x) => clip(x, 60) || null),
+    projects: list(r.projects, 6, (v) => {
+      const o = obj(v);
+      const name = clip(o.name, 80);
+      return name ? { name, minutes: num(o.minutes), progress: Math.min(100, num(o.progress)) } : null;
+    }),
+    skills: list(r.skills, 6, (v) => {
+      const o = obj(v);
+      const title = clip(o.title, 60);
+      return title ? { title, minutes: num(o.minutes) } : null;
+    }),
+    habits: list(r.habits, 12, (v) => {
+      const o = obj(v);
+      const title = clip(o.title, 80);
+      if (!title) return null;
+      const minimum = clip(o.minimum, 80);
+      return { title, done: num(o.done), due: num(o.due), streak: num(o.streak), atRisk: o.atRisk === true, ...(minimum ? { minimum } : {}) };
+    }),
+  };
+}
+
+export function reviewPrompt(summary: WeekSummary): string {
+  return `أنت محلل نظم ومراجع استراتيجي أسبوعي في تطبيق «أدرك عمرك» (نمط INTJ-A). أمامك بيانات وأرقام أسبوع المستخدم فقط. اكتب له تحليلاً موضوعياً دقيقاً ومباشراً يركز على الرافعة العالية والحقائق المجردة.
+
+${AI_RISK_INSTRUCTION}
+
+القواعد:
+- 3 ملاحظات بالضبط، كل واحدة جملة أو جملتان، وكل ملاحظة مبنية على رقم محدد من البيانات تذكره.
+- ملاحظة واحدة على الأقل عن شيء نجح فعلاً.
+- لا تخترع شيئاً ليس في البيانات. ${summary.isCurrentWeek ? "الأسبوع ما زال جارياً، فتكلّم عن بقيته." : "الأسبوع انتهى، فتكلّم عن الأسبوع القادم."}
+- لا لوم ولا جلد للذات، ولا تساهل مع الالتزام: منهج التطبيق «الإنجاز ثم التحدي» و«لا تفوّت مرتين».
+- "suggestion": فعل واحد صغير يبدأ بفعل، يصلح أن يكون أولوية في التطبيق (أقل من 12 كلمة)، و"why" سببه في جملة من الأرقام.
+- العربية البسيطة فقط.
+
+أعد JSON فقط بهذا الشكل دون أي نص آخر:
+{"risk": false, "observations": ["", "", ""], "suggestion": {"title": "", "why": ""}}
+
+بيانات الأسبوع:
+${JSON.stringify(summary)}`;
+}
+
+export function readReview(parsed: unknown): { risk: true } | ({ risk: false } & CoachReview) | null {
+  if (!parsed || typeof parsed !== "object") return null;
+  const p = parsed as Record<string, unknown>;
+  if (p.risk !== false) return { risk: true };
+  const observations = list(p.observations, 3, (x) => clip(x, 280) || null);
+  const s = (p.suggestion && typeof p.suggestion === "object" ? p.suggestion : {}) as Record<string, unknown>;
+  const title = clip(s.title, TASK_MAX);
+  if (observations.length === 0 || !title) return null;
+  return { risk: false, observations, suggestion: { title, why: clip(s.why, 200) } };
+}
+
+/** Nothing planned, no sessions, no habits due: there is nothing honest to say, so no review is written. */
+export const isEmptyWeek = (s: WeekSummary) =>
+  s.priorities.planned === 0 && s.focus.sessions === 0 && s.focus.minutes === 0 && s.habits.every((h) => h.done === 0);
+
+const plural = (n: number, one: string, two: string, many: string) => (n === 1 ? one : n === 2 ? two : `${n} ${many}`);
+const mins = (n: number) => (n < 60 ? `${n} دقيقة` : `${Math.floor(n / 60)} س${n % 60 ? ` و${n % 60} د` : ""}`);
+
+/** The review without AI: the same shape, from simple rules over the same numbers. */
+export function localReview(s: WeekSummary): CoachReview {
+  const notes: string[] = [];
+  const { priorities: p, focus: f } = s;
+  const top = s.values.find((v) => v.minutes > 0);
+  const risky = s.habits.find((h) => h.atRisk);
+  const bestHabit = [...s.habits].filter((h) => h.due > 0).sort((a, b) => b.done / b.due - a.done / a.due)[0];
+
+  if (p.rate === null) notes.push("لم تخطط أولويات في هذا الأسبوع بعد؛ الأسبوع الذي لا يُكتب يمضي وحده.");
+  else if (s.isCurrentWeek && s.daysElapsed <= 2 && p.rate < 80)
+    notes.push(`الأسبوع في بدايته: ${p.done} من ${p.planned} أولويات حتى الآن، وأمامك ${7 - s.daysElapsed} أيام.`);
+  else if (p.rate >= 80) notes.push(`أنجزت ${p.done} من ${p.planned} أولويات (${p.rate}%): هذا إيقاع يستحق أن تحميه.`);
+  else if (p.rate >= 50) notes.push(`أنجزت ${p.done} من ${p.planned} أولويات (${p.rate}%): أكثر من النصف، والفرق في أول أولوية كل يوم.`);
+  else notes.push(`أنجزت ${p.done} من ${p.planned} أولويات (${p.rate}%): ربما تخطط لأكثر مما يتسع له يومك؛ جرّب أولويتين بدل ثلاث.`);
+
+  if (f.sessions === 0) notes.push("لا جلسات تركيز مسجلة هذا الأسبوع؛ جلسة واحدة كاملة تكسر الجمود.");
+  else if (f.earlyExits > f.completed) notes.push(`أنهيت ${f.earlyExits} جلسات مبكراً مقابل ${f.completed} كاملة؛ جلسة أقصر تكتمل أفضل من طويلة تنقطع.`);
+  else notes.push(`${plural(f.completed, "جلسة كاملة واحدة", "جلستان كاملتان", "جلسات كاملة")} و${mins(f.minutes)} تركيز.`);
+
+  if (s.neglectedValues.length > 0 && top) notes.push(`أكثر وقتك ذهب إلى «${top.title}» (${mins(top.minutes)})، بينما لم تأخذ «${s.neglectedValues[0]}» شيئاً.`);
+  else if (top) notes.push(`أكثر وقتك ذهب إلى «${top.title}» (${mins(top.minutes)}).`);
+  if (risky) notes.push(`عادة «${risky.title}» فاتتك مرة؛ مرة ثانية تكسر السلسلة.`);
+  else if (bestHabit && bestHabit.done > 0) notes.push(`عادة «${bestHabit.title}»: ${bestHabit.done} من ${bestHabit.due} أيام.`);
+
+  let suggestion: CoachReview["suggestion"];
+  if (risky) suggestion = { title: `أنجز «${risky.minimum || risky.title}» اليوم`, why: "لا تفوّت مرتين: النسخة الدنيا تكفي لتحمي السلسلة." };
+  else if (s.neglectedValues.length > 0) suggestion = { title: `جلسة 25 دقيقة لقيمة «${s.neglectedValues[0]}»`, why: "قيمة بلا وقت تبقى شعاراً." };
+  else if (f.earlyExits >= 2 && f.earlyExits > f.completed) suggestion = { title: "ابدأ غداً بجلسة 15 دقيقة على أول أولوية", why: "جلسة قصيرة مكتملة تعيد الثقة قبل الطويلة." };
+  else if (s.projects[0]) suggestion = { title: `حدد الخطوة التالية في «${s.projects[0].name}»`, why: "أكثر مشاريعك حركة هذا الأسبوع؛ لا تتركه يبرد." };
+  else suggestion = { title: "اختر أولوية واحدة للغد واكتب التزامها الآن", why: "الأسبوع القادم يبدأ بقرار صغير الليلة." };
+
+  return { observations: notes.slice(0, 3), suggestion };
+}
+
+/* ---------- 3. One request, in the safe order ---------- */
+
+/** The AI as the caller has it: whether it may be used here at all, and how to ask it for JSON. */
+export interface CoachAi {
+  ready: boolean;
+  call: (prompt: string, temperature: number) => Promise<unknown | null>;
+}
+
+/**
+ * A breakdown request: local crisis check first (nothing is sent anywhere if it fires), then the AI only when
+ * the person agreed (`useAI`) and a key exists, then the strict reply check. Null means no goal (a bad request).
+ */
+export async function runBreakdown(raw: Record<string, unknown>, ai: CoachAi): Promise<BreakdownReply | null> {
+  const input = sanitizeBreakdownInput(raw);
+  if (!input.goal) return null;
+  if (isCrisis({ automaticThought: input.goal, event: input.details })) return { status: "crisis" };
+  // Breaking a goal down needs the AI; without it the person keeps adding tasks by hand.
+  if (raw.useAI !== true || !ai.ready) return { status: "unavailable" };
+
+  const result = readBreakdown(await ai.call(breakdownPrompt(input), 0.5), {
+    valueIds: input.values.map((v) => v.id),
+    existing: [...input.existingTasks, ...input.doneTasks],
+  });
+  if (!result) return { status: "failed" };
+  if (result.risk) return { status: "crisis" };
+  const { projectName, description, valueIds, tasks, firstStep } = result;
+  return { status: "ok", breakdown: { projectName, description, valueIds, tasks, firstStep } };
+}
+
+/** A review request: the early-exit reasons (the only free text) are crisis-checked first; no AI means the local rules. */
+export async function runReview(raw: Record<string, unknown>, ai: CoachAi): Promise<ReviewReply> {
+  const summary = sanitizeWeekSummary(raw.summary);
+  const reasons = summary.focus.exitReasons.join("\n");
+  if (reasons && isCrisis({ automaticThought: reasons })) return { status: "crisis" };
+
+  if (raw.useAI === true && ai.ready) {
+    const result = readReview(await ai.call(reviewPrompt(summary), 0.6));
+    if (result?.risk) return { status: "crisis" };
+    if (result) return { status: "ok", engine: "ai", review: { observations: result.observations, suggestion: result.suggestion } };
+  }
+  return { status: "ok", engine: "local", review: localReview(summary) };
+}
+
+const DEFAULT_MODEL = "gemini-3.5-flash"; // gemini-2.5-flash was retired for new users
+
+/**
+ * One Gemini call that must answer JSON. Server-side only: the key is passed in by the computer's server or the
+ * Supabase function and never reaches a screen. Null on any failure (HTTP error, timeout, bad JSON), so callers fall back.
+ */
+export async function geminiJson(
+  prompt: string,
+  temperature: number,
+  opts: { key?: string; model?: string; fetch?: typeof fetch }
+): Promise<unknown | null> {
+  const key = opts.key?.trim();
+  if (!key) return null;
+  const model = opts.model?.trim() || DEFAULT_MODEL;
+  const doFetch = opts.fetch ?? fetch;
+  try {
+    const res = await doFetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: "application/json", temperature },
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) {
+      console.warn(`Gemini (${model}) returned HTTP ${res.status}`);
+      return null;
+    }
+    const data = await res.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (typeof text !== "string") return null;
+    const clean = text.replace(/^```(?:json)?\s*|\s*```$/gi, "").trim();
+    return clean ? JSON.parse(clean) : null;
+  } catch (err) {
+    console.warn("Gemini call failed:", err);
+    return null;
+  }
+}
