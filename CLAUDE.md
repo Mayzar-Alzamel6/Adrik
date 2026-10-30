@@ -67,6 +67,12 @@ Keep these when porting from adrik-app (overwriting them loses personal work):
 - Runtime fields (timer, break, theme, `activeFrogId`…) are in `LOCAL_ONLY` in `core.ts`.
   A new runtime-only field in the main store belongs there too.
 - Supabase setup is still waiting on the founder (project, SQL, single user, connect PC first, then phone).
+- **Wi-Fi sync** (the usual mode): the PC is the server (`lib/sync/lanServer.ts`, route `app/api/lan-sync`).
+  - Its data lives in **`.lan-sync/data.json`** (with `.bak`) inside this folder: never delete it, never `robocopy /MIR` over it.
+  - The password is set only on the PC with `npm run sync-password`. Only the scrypt-derived key is stored (PC file,
+    phone keystore via `expo-secure-store`, PC browser localStorage); every request and reply is sealed with it
+    (ChaCha20-Poly1305, `@noble/ciphers` on the devices, `node:crypto` on the PC). Changing the password means
+    connecting every device again.
 
 ## CBT safety layer
 

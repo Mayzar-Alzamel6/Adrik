@@ -3,27 +3,31 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
 const dir = mkdtempSync(path.join(os.tmpdir(), "lan-sync-"));
 process.env.LAN_SYNC_DIR = dir;
 
-const { handleLan, resetLanLimits, setLanPassword } = await import("../src/lib/sync/lanServer.ts");
-const { lanRemote, lanInfo, lanSetup, lanUrl, startSession, syncAll } = await import("../src/lib/sync/core.ts");
+const { deriveLanKey, handleLan, resetLanLimits, setLanPassword } = await import("../src/lib/sync/lanServer.ts");
+const { lanInfo, lanKey, lanRemote, lanUrl, startSession, syncAll } = await import("../src/lib/sync/core.ts");
 
 let server;
 let url;
+/** Every request body the computer received, as it crossed the network. */
+const wire = [];
 
 before(async () => {
   server = http.createServer((req, res) => {
     let raw = "";
     req.on("data", (c) => (raw += c));
     req.on("end", () => {
+      if (raw) wire.push(raw);
+      const host = (req.headers.host ?? "").replace(/:\d+$/, "");
       const out = handleLan({
         method: req.method,
-        key: req.headers["x-sync-key"] ?? null,
+        device: req.headers["x-sync-device"] ? decodeURIComponent(req.headers["x-sync-device"]) : null,
+        local: host === "localhost",
         body: raw ? JSON.parse(raw) : null,
       });
       res.writeHead(out.status, { "Content-Type": "application/json" });
@@ -38,6 +42,9 @@ after(() => {
   server.close();
   rmSync(dir, { recursive: true, force: true });
 });
+
+const post = (body, headers = {}) =>
+  fetch(`${url}/api/lan-sync`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
 
 function memoryDevice(stores = {}) {
   const data = new Map(Object.entries(stores).map(([k, v]) => [k, structuredClone(v)]));
@@ -55,6 +62,8 @@ function memoryDevice(stores = {}) {
 }
 
 const cfg = (key, device = "pc") => ({ url, key, email: "", device, mode: "lan" });
+const dataFile = () => JSON.parse(readFileSync(path.join(dir, "data.json"), "utf8"));
+let key;
 
 test("lanUrl fills in the scheme and port", () => {
   assert.equal(lanUrl("192.168.2.105"), "http://192.168.2.105:3334");
@@ -62,56 +71,71 @@ test("lanUrl fills in the scheme and port", () => {
   assert.equal(lanUrl("http://localhost:3334"), "http://localhost:3334");
 });
 
-const dataFile = () => JSON.parse(readFileSync(path.join(dir, "data.json"), "utf8"));
-
 test("nothing works before the password is chosen, and a short one is refused", async () => {
-  assert.equal((await lanInfo(url)).hasPassword, false);
-  await assert.rejects(() => startSession(cfg("whatever"), ""), /لم تُعيَّن/);
-  assert.equal(setLanPassword("123").ok, false);
+  const info = await lanInfo(url);
+  assert.equal(info.hasPassword, false);
+  assert.equal(info.salt, null);
+  await assert.rejects(() => lanKey(url, "whatever-pass"), /لم تُعيَّن/);
+  assert.equal(setLanPassword("1234567").ok, false);
 });
 
-test("the password is never set over the network, whatever the Host header says", async () => {
-  await assert.rejects(() => lanSetup(url, "secret-pass"), /npm run sync-password/);
-  const forged = handleLan({ method: "POST", key: null, body: { action: "setup", password: "secret-pass" } });
-  assert.equal(forged.status, 403);
+test("the password is never set over the network", async () => {
+  const res = await post({ action: "setup", password: "secret-pass" }, { Host: "localhost" });
+  assert.equal(res.status, 403);
   assert.equal((await lanInfo(url)).hasPassword, false);
+  wire.length = 0; // that refused request carried a password on purpose; from here on, the wire is checked
 });
 
-test("the password set on the computer is stored as a salted scrypt hash", async () => {
+test("the computer keeps the derived key, never the password; devices derive the same key", async () => {
   assert.equal(setLanPassword("secret-pass").ok, true);
-  assert.equal((await lanInfo(url)).hasPassword, true);
   const { auth } = dataFile();
-  assert.equal(auth.kdf, "scrypt");
   assert.ok(!JSON.stringify(auth).includes("secret-pass"));
-  await startSession(cfg("secret-pass"), "");
+  key = await lanKey(url, "secret-pass");
+  assert.equal(key, auth.key);
+  assert.equal(key, deriveLanKey("secret-pass", auth.salt));
+  await startSession(cfg(key), "");
 });
 
-test("an old sha256 hash still works once and is upgraded to scrypt", async () => {
-  const saved = readFileSync(path.join(dir, "data.json"), "utf8");
-  const salt = "abc";
-  const db = dataFile();
-  db.auth = { salt, hash: createHash("sha256").update(`${salt}:old-password`).digest("hex") };
-  writeFileSync(path.join(dir, "data.json"), JSON.stringify(db));
-  await startSession(cfg("old-password"), "");
-  assert.equal(dataFile().auth.kdf, "scrypt");
-  await startSession(cfg("old-password"), "");
-  writeFileSync(path.join(dir, "data.json"), saved);
+test("the addresses are listed only on the computer's own page", async () => {
+  assert.deepEqual((await lanInfo(url)).addresses, []);
+  const local = await (await fetch(`${url}/api/lan-sync`, { headers: { Host: "localhost" } })).json();
+  assert.ok(Array.isArray(local.addresses));
 });
 
-test("a wrong password is refused, five misses lock for a minute", async () => {
-  await assert.rejects(() => startSession(cfg("nope-nope"), ""), /غير صحيحة/);
-  for (let i = 0; i < 4; i++) await assert.rejects(() => startSession(cfg("nope-nope"), ""));
-  await assert.rejects(() => startSession(cfg("secret-pass"), ""), /محاولات كثيرة/);
+test("a device holding a password instead of a key is asked to connect again", async () => {
+  await assert.rejects(() => startSession(cfg("secret-pass"), ""), /أعد ربط المزامنة/);
+});
+
+test("a wrong key locks only its own device; many misses from rotating names lock everyone", async () => {
   resetLanLimits();
-  await startSession(cfg("secret-pass"), "");
+  const wrong = await lanKey(url, "wrong-password");
+  await assert.rejects(() => startSession(cfg(wrong, "intruder"), ""), /غير صحيحة/);
+  for (let i = 0; i < 4; i++) await assert.rejects(() => startSession(cfg(wrong, "intruder"), ""));
+  await assert.rejects(() => startSession(cfg(wrong, "intruder"), ""), /محاولات كثيرة/);
+  await startSession(cfg(key, "phone"), "");
+
+  for (let i = 0; i < 30; i++) await assert.rejects(() => startSession(cfg(wrong, `name-${i}`), ""));
+  await assert.rejects(() => startSession(cfg(key, "phone"), ""), /محاولات كثيرة/);
+  resetLanLimits();
+  await startSession(cfg(key, "phone"), "");
+});
+
+test("an old password-hash file asks for the password to be set again", async () => {
+  const saved = readFileSync(path.join(dir, "data.json"), "utf8");
+  const db = dataFile();
+  db.auth = { salt: "abc", hash: "00", kdf: "scrypt" };
+  writeFileSync(path.join(dir, "data.json"), JSON.stringify(db));
+  assert.equal((await lanInfo(url)).hasPassword, false);
+  await assert.rejects(() => startSession(cfg(key), ""), /أعد تعيين/);
+  writeFileSync(path.join(dir, "data.json"), saved);
 });
 
 test("two devices converge through the computer, edits on both sides survive, a fresh phone only pulls", async () => {
   const pc = memoryDevice({
     main: { version: 2, state: { onboardingDone: true, userName: "م", frogs: [{ id: "f-1", title: "تقرير" }] } },
   });
-  const pcRemote = lanRemote(cfg("secret-pass", "pc"));
-  const phoneRemote = lanRemote(cfg("secret-pass", "phone"));
+  const pcRemote = lanRemote(cfg(key, "pc"));
+  const phoneRemote = lanRemote(cfg(key, "phone"));
 
   assert.equal((await syncAll(pcRemote, pc)).main, "pushed");
 
@@ -136,10 +160,26 @@ test("two devices converge through the computer, edits on both sides survive, a 
 });
 
 test("a stale conditional write is refused instead of overwriting", async () => {
-  const remote = lanRemote(cfg("secret-pass"));
+  const remote = lanRemote(cfg(key));
   const [row] = (await remote.list()).filter((r) => r.slot === "main");
   const first = await remote.update("main", row.data, row.updated_at);
   assert.ok(first);
   assert.equal(await remote.update("main", row.data, row.updated_at), null);
   assert.equal(await remote.insert("main", row.data), null);
+});
+
+test("nothing crosses the Wi-Fi in the clear: no data, no password, no key", () => {
+  const all = wire.join("\n");
+  assert.ok(wire.length > 5);
+  for (const secret of ["تقرير", "من الجوال", "onboardingDone", "secret-pass", key]) assert.ok(!all.includes(secret), secret);
+});
+
+test("a captured request can't be sent again, and a stale one is refused", async () => {
+  const captured = JSON.parse(wire.at(-1));
+  const again = await post(captured);
+  assert.equal(again.status, 401);
+  assert.match((await again.json()).error, /مكرر/);
+  const forged = await post({ ...captured, c: captured.c.slice(0, -4) + "AAAA" });
+  assert.equal(forged.status, 401);
+  resetLanLimits();
 });

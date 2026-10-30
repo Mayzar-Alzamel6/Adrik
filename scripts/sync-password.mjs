@@ -3,7 +3,8 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 
-const { setLanPassword, MIN_PASSWORD } = await import("../src/lib/sync/lanServer.ts");
+const { setLanPassword, lanAddresses } = await import("../src/lib/sync/lanServer.ts");
+const { LAN_MIN_PASSWORD: MIN_PASSWORD, LAN_PORT } = await import("../src/lib/sync/core.ts");
 
 const rl = createInterface({ input: stdin, output: stdout });
 const lines = rl[Symbol.asyncIterator]();
@@ -25,4 +26,6 @@ if (!res.ok) {
   console.error(res.error);
   process.exit(1);
 }
-console.log("تم. اكتب الكلمة نفسها في الكمبيوتر والهاتف عند «ربط وبدء المزامنة».");
+console.log("تم. اكتب الكلمة نفسها في الكمبيوتر والهاتف عند «ربط وبدء المزامنة». الأجهزة المربوطة سابقاً تحتاج إعادة الربط.");
+const addresses = lanAddresses();
+if (addresses.length) console.log(`عنوان الكمبيوتر للهاتف: ${addresses.map((a) => `${a}:${LAN_PORT}`).join("  أو  ")}`);

@@ -27,8 +27,8 @@ export function NeuroGate() {
   return (
     <Modal visible={open} animationType="fade" onRequestClose={isMorningMandatory ? undefined : skipNeuroGate}>
       <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }}>
-        {/* Mounted only while open, so every visit starts fresh from the intro. */}
-        {open ? <GateFlow isMorningMandatory={isMorningMandatory} /> : null}
+        {/* Mounted only while open, so every visit starts fresh from the intro; a change of mode remounts it too. */}
+        {open ? <GateFlow key={String(isMorningMandatory)} isMorningMandatory={isMorningMandatory} /> : null}
       </SafeAreaView>
     </Modal>
   );
@@ -52,7 +52,6 @@ function GateFlow({ isMorningMandatory }: { isMorningMandatory: boolean }) {
 
   useEffect(() => {
     if (!isMorningMandatory) return;
-    setSkipCountdown(15);
     const id = setInterval(() => {
       setSkipCountdown((prev) => {
         if (prev <= 1) {

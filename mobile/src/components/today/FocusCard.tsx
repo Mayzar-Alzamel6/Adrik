@@ -7,22 +7,22 @@ import { useProjectsStore } from "@/stores/useProjectsStore";
 import { useLineageResolver } from "@/lib/lineage";
 import { formatTime, fullSessions, minutesAr, toLocalDateString } from "@/lib/utils";
 import { successFeedback } from "@/lib/feedback";
-import { ROW, radius, useColors } from "@/theme";
+import { radius, useColors } from "@/theme";
 import {
   Badge,
   Button,
   Card,
-  Chip,
   Input,
   Label,
   LinkButton,
   ProgressRing,
   Row,
   Segmented,
-  Sheet,
   Txt,
 } from "@/components/ui";
 import { FrogLinkSheet, LineageLine } from "@/components/today/FrogLinkSheet";
+import { MasteryGateSheet } from "@/components/today/priorities/PrioritySheets";
+import { EarlyExitSheet } from "@/components/today/focus/EarlyExitSheet";
 import { RcaTriageModal, type BugType } from "@/components/today/RcaTriageModal";
 import { useFocusGuardStore } from "@/stores/useFocusGuardStore";
 import { deepBlocksOn, isEarlyQuit } from "@/lib/focusGuard";
@@ -35,8 +35,6 @@ const MODES: { value: FocusTimerMode; label: string; minutes: number; caption: s
   { value: "FLUENCY_15", label: "15 د", minutes: 15, caption: "دفعة بدء" },
   { value: "KICKOFF_10", label: "10 د", minutes: 10, caption: "كتلة إقلاع" },
 ];
-
-const EXIT_REASONS = [EXTERNAL_INTERRUPTION, "تعب أو إرهاق", "تشتّت وهروب", "المهمة لم تكن واضحة"];
 
 /** Full shorter sessions before the 90-minute block is suggested. */
 const DEEP_NUDGE_AFTER = 3;
@@ -83,7 +81,6 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
   const [eyeDismissedBlock, setEyeDismissedBlock] = useState(0);
   const [justDone, setJustDone] = useState(false);
   const [exitOpen, setExitOpen] = useState(false);
-  const [exitReason, setExitReason] = useState("");
   const [endedEarly, setEndedEarly] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
 
@@ -91,7 +88,6 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
   const [rcaOpen, setRcaOpen] = useState(false);
   const [rcaNotice, setRcaNotice] = useState<string | null>(null);
   const [masteryGateOpen, setMasteryGateOpen] = useState(false);
-  const [focusMasteryDod, setFocusMasteryDod] = useState("");
 
   // Focus guard
   const guard = useFocusGuardStore();
@@ -181,17 +177,12 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
 
   // Open Mastery Gate instead of blind completion
   const handleCompleteClick = () => {
-    if (!current || current.isCompleted) return;
-    setFocusMasteryDod(current.definitionOfDone || "");
-    setMasteryGateOpen(true);
+    if (current && !current.isCompleted) setMasteryGateOpen(true);
   };
 
-  const confirmMasteryCompletion = () => {
-    if (!current || !focusMasteryDod.trim()) return;
-
-    if (focusMasteryDod.trim() !== current.definitionOfDone) {
-      s.updateFrog(current.id, { definitionOfDone: focusMasteryDod.trim() });
-    }
+  const confirmMasteryCompletion = (dod: string) => {
+    if (!current) return;
+    if (dod !== current.definitionOfDone) s.updateFrog(current.id, { definitionOfDone: dod });
 
     if (isFocusRunning) {
       s.finishFocusSession({ completed: true, outcome: "DONE" });
@@ -208,14 +199,12 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
     setExitOpen(false);
   };
 
-  const endEarly = () => {
-    if (!exitReason.trim()) return;
+  const endEarly = (reason: string) => {
     const startedAt = s.focusStartedAt;
-    const quitEarly = Boolean(startedAt && isEarlyQuit(Date.now() - startedAt)) && exitReason !== EXTERNAL_INTERRUPTION;
+    const quitEarly = Boolean(startedAt && isEarlyQuit(Date.now() - startedAt)) && reason !== EXTERNAL_INTERRUPTION;
     if (quitEarly) guard.setResumable({ mode: focusMode, secondsLeft: focusSecondsRemaining, commitment: focusCommitment });
-    s.finishFocusSession({ completed: false, earlyExitReason: exitReason.trim() });
+    s.finishFocusSession({ completed: false, earlyExitReason: reason });
     if (quitEarly) guard.flagDistraction("early-quit");
-    setExitReason("");
     setExitOpen(false);
     setEndedEarly(true);
   };
@@ -576,79 +565,15 @@ export function FocusCard({ onOpenScratchpad }: { onOpenScratchpad: () => void }
         onApplyPatch={handleApplyRcaPatch}
       />
 
-      {/* Mastery Gate Confirmation Sheet */}
-      <Sheet
-        open={masteryGateOpen}
-        onClose={() => setMasteryGateOpen(false)}
-        title="بوابة تأكيد الإتقان (Mastery Gate)"
-        description="التحقق من إغلاق الدائرة بالكامل وتسليم النتيجة الموعودة."
-      >
-        <View style={{ gap: 14 }}>
-          <View style={{ backgroundColor: c.surface2, borderRadius: radius.md, padding: 12 }}>
-            <Txt variant="caption" color="ink2">
-              المهمة الحالية:
-            </Txt>
-            <Txt weight="bold" style={{ marginTop: 2 }}>
-              {current?.title}
-            </Txt>
-          </View>
-
-          <View>
-            <Label hint="هل تم تسليم الأثر بالكامل وفق شرط الإتقان؟">شرط الاكتمال (Definition of Done)</Label>
-            <Input
-              value={focusMasteryDod}
-              onChangeText={setFocusMasteryDod}
-              placeholder="اكتب معيار التسليم الفعلي..."
-              multiline
-            />
-          </View>
-
-          <Row gap={10} style={{ justifyContent: "flex-end", marginTop: 4 }}>
-            <Button
-              title="إلغاء"
-              variant="secondary"
-              onPress={() => setMasteryGateOpen(false)}
-              style={{ flex: 1 }}
-            />
-            <Button
-              title="تأكيد الإتقان وإغلاق المهمة 🎯"
-              disabled={!focusMasteryDod.trim()}
-              onPress={confirmMasteryCompletion}
-              style={{ flex: 2 }}
-            />
-          </Row>
-        </View>
-      </Sheet>
-
-      {/* Early Exit Sheet */}
-      <Sheet
+      <MasteryGateSheet frog={masteryGateOpen && current ? current : null} onClose={() => setMasteryGateOpen(false)} onConfirm={confirmMasteryCompletion} />
+      <EarlyExitSheet
         open={exitOpen}
         onClose={() => setExitOpen(false)}
-        title="إنهاء الجلسة قبل وقتها؟"
-        description={
-          focusStreak === 0
-            ? "لا بأس، لكن سجّلها بصدق."
-            : focusStreakAtRisk
-            ? `هذا ثاني تعثّر على التوالي: سلسلتك (${fullSessions(focusStreak)}) ستعود إلى الصفر، إلا إن كانت مقاطعة خارجية لا مفر منها.`
-            : `سلسلتك (${fullSessions(focusStreak)}) تتحمّل تعثّراً واحداً. لا تفوّتها مرتين: الجلسة التالية يجب أن تكتمل.`
-        }
-      >
-        <View style={{ borderRadius: radius.md, backgroundColor: c.brandSoft, padding: 14, gap: 10 }}>
-          <Txt variant="ui">هل أنهيت ما التزمت به قبل الوقت؟</Txt>
-          <Button title="نعم، أنجزت العقد" icon="check" size="sm" onPress={deliveredEarly} style={{ alignSelf: "flex-end" }} />
-        </View>
-        <Label>وإن لم تُنجزه، ما الذي قطعك؟</Label>
-        <View style={{ flexDirection: ROW, flexWrap: "wrap", gap: 8 }}>
-          {EXIT_REASONS.map((r) => (
-            <Chip key={r} label={r} selected={exitReason === r} onPress={() => setExitReason(r)} />
-          ))}
-        </View>
-        <Input value={exitReason} onChangeText={setExitReason} placeholder="أو اكتب السبب" />
-        <Row style={{ justifyContent: "space-between" }}>
-          <Button title="سأكمل الجلسة" onPress={() => setExitOpen(false)} />
-          <Button title="إنهاء الآن" variant="ghost" disabled={!exitReason.trim()} onPress={endEarly} />
-        </Row>
-      </Sheet>
+        streak={focusStreak}
+        streakAtRisk={focusStreakAtRisk}
+        onDelivered={deliveredEarly}
+        onEndEarly={endEarly}
+      />
     </Card>
   );
 }

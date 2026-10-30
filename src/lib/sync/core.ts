@@ -9,6 +9,9 @@
  * A device that was never set up (onboarding not done) only takes the synced copy; it never creates or changes it.
  */
 
+import { chacha20poly1305 } from "@noble/ciphers/chacha";
+import { scryptAsync } from "@noble/hashes/scrypt";
+
 export type Slot = "main" | "vault" | "planner" | "projects";
 
 export const SYNC_SLOTS: Record<Slot, string> = {
@@ -41,7 +44,6 @@ const LOCAL_ONLY: Partial<Record<Slot, string[]>> = {
   vault: ["isSurfingModalOpen", "currentSurfingItem"],
 };
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 type Json = any;
 
 export interface Persisted {
@@ -71,9 +73,6 @@ function identity(item: Json): string | null {
   if (typeof item.weekNumber === "number") return `week:${item.year ?? ""}-${item.weekNumber}`;
   return null;
 }
-
-const keyed = (list: Json[]) => list.every((x) => identity(x) !== null);
-const primitive = (list: Json[]) => list.every((x) => x === null || typeof x !== "object");
 
 /**
  * Three-way merge. Whatever only one side changed since `base` is taken from that side; records are matched by
@@ -185,7 +184,7 @@ export function withLocal(slot: Slot, synced: Persisted, current: Persisted | nu
 
 export interface SyncConfig {
   url: string;
-  /** The project's publishable (or legacy anon) key: public by design, rows are protected by RLS. In "lan" mode: the sync password. */
+  /** The project's publishable (or legacy anon) key: public by design, rows are protected by RLS. In "lan" mode: the derived sync key (hex), never the password. */
   key: string;
   email: string;
   device: string;
@@ -281,7 +280,18 @@ export function supabaseRemote(cfg: SyncConfig, accessToken: string): Remote {
 
 /* ---------------- Wi-Fi: the computer is the server ---------------- */
 
+/**
+ * Wi-Fi sync runs over plain http on the home network, so every request and reply is sealed with
+ * ChaCha20-Poly1305 under a key derived from the sync password (scrypt, the computer's salt). The password itself
+ * never travels and is never stored: devices keep only the derived key (`cfg.key`, hex). A request that does not
+ * open with the key is refused, so sealing is also the sign-in. The computer's side is `lanServer.ts` (node:crypto).
+ */
+
 export const LAN_PORT = 3334;
+export const LAN_MIN_PASSWORD = 8;
+/** scrypt cost for the sync key; the computer uses the same numbers (`lanServer.ts`). */
+export const LAN_KDF = { N: 2 ** 14, r: 8, p: 1, dkLen: 32 } as const;
+const LAN_AAD = "adrik-lan-v1";
 
 /** Accepts "192.168.2.105", "192.168.2.105:3334" or a full http:// address. */
 export function lanUrl(input: string): string {
@@ -294,47 +304,103 @@ export function lanUrl(input: string): string {
 const lanEndpoint = (url: string) => `${base(url)}/api/lan-sync`;
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
-/** Whether the computer already has a sync password, and the addresses the phone can reach it on. */
-export async function lanInfo(url: string): Promise<{ hasPassword: boolean; addresses: string[] }> {
+const toHex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+const fromHex = (h: string) => Uint8Array.from(h.match(/../g) ?? [], (x) => parseInt(x, 16));
+export const isLanKey = (k: string) => /^[0-9a-f]{64}$/.test(k);
+
+function toB64(b: Uint8Array) {
+  let s = "";
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+const fromB64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
+const utf8 = (s: string) => new TextEncoder().encode(s);
+/** Hermes may lack TextDecoder; a plain UTF-8 decoder keeps this file runnable everywhere. */
+function fromUtf8(b: Uint8Array): string {
+  if (typeof TextDecoder !== "undefined") return new TextDecoder().decode(b);
+  let out = "";
+  for (let i = 0; i < b.length; ) {
+    const c = b[i++];
+    let cp = c;
+    if (c >= 0xf0) cp = ((c & 7) << 18) | ((b[i++] & 63) << 12) | ((b[i++] & 63) << 6) | (b[i++] & 63);
+    else if (c >= 0xe0) cp = ((c & 15) << 12) | ((b[i++] & 63) << 6) | (b[i++] & 63);
+    else if (c >= 0xc0) cp = ((c & 31) << 6) | (b[i++] & 63);
+    out += String.fromCodePoint(cp);
+  }
+  return out;
+}
+
+interface Sealed {
+  n: string;
+  c: string;
+}
+
+function seal(keyHex: string, value: unknown, aad: string): Sealed {
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const c = chacha20poly1305(fromHex(keyHex), nonce, utf8(aad)).encrypt(utf8(JSON.stringify(value)));
+  return { n: toB64(nonce), c: toB64(c) };
+}
+
+function open(keyHex: string, sealed: Sealed, aad: string): unknown {
+  const plain = chacha20poly1305(fromHex(keyHex), fromB64(sealed.n), utf8(aad)).decrypt(fromB64(sealed.c));
+  return JSON.parse(fromUtf8(plain));
+}
+
+export interface LanInfo {
+  hasPassword: boolean;
+  /** The scrypt salt for the sync key; null until the password is chosen on the computer. */
+  salt: string | null;
+  /** Shown on the computer itself only. */
+  addresses: string[];
+}
+
+/** Whether the computer has a sync password, its key salt, and (on the computer itself) its addresses. */
+export async function lanInfo(url: string): Promise<LanInfo> {
   return request(lanEndpoint(url), { headers: { "Cache-Control": "no-cache" } });
 }
 
-/** First-time choice of the sync password; the computer accepts it only from itself. */
-export async function lanSetup(url: string, password: string): Promise<void> {
-  await request(lanEndpoint(url), { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ action: "setup", password }) });
+/** The sync key for this computer: scrypt of the password with the computer's salt, as hex. Slow on purpose. */
+export async function lanKey(url: string, password: string): Promise<string> {
+  const info = await lanInfo(url);
+  if (!info.hasPassword || !info.salt) throw new Error("لم تُعيَّن كلمة المزامنة بعد. عيّنها على الكمبيوتر: npm run sync-password.");
+  return toHex(await scryptAsync(password, info.salt, LAN_KDF));
+}
+
+/** One sealed call. The reply is sealed against the request's own nonce, so an old reply can't be replayed. */
+async function lanCall(cfg: SyncConfig, op: Json): Promise<unknown> {
+  if (!isLanKey(cfg.key)) throw Object.assign(new Error("أعد ربط المزامنة: أدخل كلمة المزامنة مرة أخرى."), { status: 401 });
+  const sealed = seal(cfg.key, { ...op, ts: Date.now() }, LAN_AAD);
+  const res: Sealed = await request(lanEndpoint(cfg.url), {
+    method: "POST",
+    headers: { ...JSON_HEADERS, "x-sync-device": encodeURIComponent(cfg.device.slice(0, 60)) },
+    body: JSON.stringify({ v: 1, ...sealed }),
+  });
+  return open(cfg.key, res, `${LAN_AAD}:${sealed.n}`);
 }
 
 export function lanRemote(cfg: SyncConfig): Remote {
-  const endpoint = lanEndpoint(cfg.url);
-  const headers = { ...JSON_HEADERS, "x-sync-key": cfg.key };
   const conflict = (e: unknown) => (e as { status?: number }).status === 409;
+  const write = async (op: Json) => {
+    try {
+      const rows = (await lanCall(cfg, op)) as Row[];
+      return rows?.[0] ?? null;
+    } catch (e) {
+      if (conflict(e)) return null;
+      throw e;
+    }
+  };
   return {
-    list: () => request(endpoint, { headers }),
-    insert: async (slot, data) => {
-      try {
-        const rows = await request(endpoint, { method: "POST", headers, body: JSON.stringify({ slot, data, device: cfg.device }) });
-        return rows?.[0] ?? null;
-      } catch (e) {
-        if (conflict(e)) return null;
-        throw e;
-      }
-    },
-    update: async (slot, data, ifUpdatedAt) => {
-      try {
-        const rows = await request(endpoint, { method: "PUT", headers, body: JSON.stringify({ slot, data, device: cfg.device, ifUpdatedAt }) });
-        return rows?.[0] ?? null;
-      } catch (e) {
-        if (conflict(e)) return null;
-        throw e;
-      }
-    },
+    list: async () => (await lanCall(cfg, { op: "list" })) as Row[],
+    insert: (slot, data) => write({ op: "insert", slot, data, device: cfg.device }),
+    update: (slot, data, ifUpdatedAt) => write({ op: "update", slot, data, device: cfg.device, ifUpdatedAt }),
   };
 }
 
-/** Wi-Fi sync has no sign-in session: the password rides on every request, so this one never expires. */
+/** Wi-Fi sync has no sign-in session: every request is sealed with the sync key, so this one never expires. */
 const LAN_SESSION: Session = { accessToken: "lan", refreshToken: "", expiresAt: Number.MAX_SAFE_INTEGER };
 
-/** Signs in to Supabase, or (Wi-Fi) checks the computer accepts the password. */
+/** Signs in to Supabase, or (Wi-Fi) checks the computer opens a request sealed with the sync key. */
 export async function startSession(cfg: SyncConfig, password: string): Promise<Session> {
   if (cfg.mode !== "lan") return signIn(cfg, password);
   await lanRemote(cfg).list();

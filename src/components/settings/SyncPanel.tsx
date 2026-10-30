@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Check, Cloud, CloudOff, RefreshCw } from "lucide-react";
 import { onLocalChange, syncNow, useSyncStore } from "@/lib/sync/web";
-import { LAN_PORT, lanInfo } from "@/lib/sync/core";
+import { LAN_MIN_PASSWORD, LAN_PORT, lanInfo, lanKey, type LanInfo } from "@/lib/sync/core";
 import { Button } from "@/components/ui/Button";
 import { Badge, Card, Input, Label } from "@/components/ui/primitives";
 
@@ -95,7 +95,7 @@ export function SyncPanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<"lan" | "cloud">(config && config.mode !== "lan" ? "cloud" : "lan");
-  const [lan, setLan] = useState<{ hasPassword: boolean; addresses: string[] } | null>(null);
+  const [lan, setLan] = useState<LanInfo | null>(null);
   const [lanPassword, setLanPassword] = useState("");
 
   // The computer's own sync service: whether a password exists yet, and the addresses the phone can reach.
@@ -108,10 +108,9 @@ export function SyncPanel() {
     setBusy(true);
     setError(null);
     try {
-      await connect(
-        { url: window.location.origin, key: lanPassword, email: "", device: form.device.trim() || "الكمبيوتر", mode: "lan" },
-        ""
-      );
+      // Only the key derived from the password is kept, never the password.
+      const key = await lanKey(window.location.origin, lanPassword);
+      await connect({ url: window.location.origin, key, email: "", device: form.device.trim() || "الكمبيوتر", mode: "lan" }, "");
       setLanPassword("");
     } catch (err) {
       setError((err as Error).message);
@@ -225,7 +224,7 @@ export function SyncPanel() {
                   <Label htmlFor="lan-pass" hint="التي اخترتها بالأمر npm run sync-password">
                     كلمة المزامنة
                   </Label>
-                  <Input id="lan-pass" dir="ltr" type="password" autoComplete="off" value={lanPassword} onChange={(e) => setLanPassword(e.target.value)} required minLength={6} />
+                  <Input id="lan-pass" dir="ltr" type="password" autoComplete="off" value={lanPassword} onChange={(e) => setLanPassword(e.target.value)} required minLength={LAN_MIN_PASSWORD} />
                 </div>
               )}
               <div>
@@ -238,7 +237,7 @@ export function SyncPanel() {
                 {busy ? "جارٍ الربط…" : "ربط وبدء المزامنة"}
               </Button>
               <p className="text-small text-ink-3">
-                أول مزامنة تجمع ما على الجهازين دون أن تحذف شيئاً. شبكة الوايفاي لا تُشفّر هذا الاتصال، فاستعمله على شبكة بيتك فقط.
+                أول مزامنة تجمع ما على الجهازين دون أن تحذف شيئاً. البيانات تُشفَّر بمفتاح من كلمة المزامنة، فاختر كلمة طويلة لا تستعملها في مكان آخر.
               </p>
             </form>
           ) : (

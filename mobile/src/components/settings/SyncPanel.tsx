@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { AppState, View } from "react-native";
 import { PERSONAL_SYNC_ENABLED, onLocalChange, syncNow, useSyncStore } from "@/lib/sync/native";
-import { lanUrl } from "@/lib/sync/core";
+import { LAN_MIN_PASSWORD, lanKey, lanUrl } from "@/lib/sync/core";
 import { PIN_PATTERN, checkPin, clearPin, hasPin, setPin } from "@/lib/sync/pin";
 import { radius, useColors } from "@/theme";
 import { Badge, Button, Card, Input, Label, Row, SectionHeader, Txt } from "@/components/ui";
@@ -154,7 +154,7 @@ function SyncControls({ onLock }: { onLock: () => void }) {
   const { config, session, lastSyncAt, lastError, running, connect, disconnect } = useSyncStore();
   const [form, setForm] = useState({
     url: config?.url ?? "",
-    key: config?.key ?? "",
+    key: config?.mode === "lan" ? "" : config?.key ?? "",
     email: config?.email ?? "",
     device: config?.device ?? "الهاتف",
     password: "",
@@ -169,7 +169,10 @@ function SyncControls({ onLock }: { onLock: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      await connect({ url: lanUrl(lan.address), key: lan.password, email: "", device: form.device.trim() || "الهاتف", mode: "lan" }, "");
+      // Only the key derived from the password is kept (in the phone's keystore), never the password.
+      const url = lanUrl(lan.address);
+      const key = await lanKey(url, lan.password);
+      await connect({ url, key, email: "", device: form.device.trim() || "الهاتف", mode: "lan" }, "");
       setLan((l) => ({ ...l, password: "" }));
     } catch (err) {
       const msg = (err as Error).message;
@@ -249,9 +252,9 @@ function SyncControls({ onLock }: { onLock: () => void }) {
                   {error}
                 </Txt>
               ) : null}
-              <Button title={busy ? "جارٍ الربط…" : "ربط وبدء المزامنة"} icon="check" disabled={busy || !lan.address.trim() || lan.password.length < 6} onPress={submitLan} />
+              <Button title={busy ? "جارٍ الربط…" : "ربط وبدء المزامنة"} icon="check" disabled={busy || !lan.address.trim() || lan.password.length < LAN_MIN_PASSWORD} onPress={submitLan} />
               <Txt variant="small" color="ink3">
-                أول مزامنة تجمع ما على الجهازين دون أن تحذف شيئاً. الاتصال غير مشفّر، فاستعمله على شبكة بيتك فقط.
+                أول مزامنة تجمع ما على الجهازين دون أن تحذف شيئاً. البيانات تُشفَّر بمفتاح من كلمة المزامنة، فاختر كلمة طويلة لا تستعملها في مكان آخر.
               </Txt>
             </View>
           ) : null}

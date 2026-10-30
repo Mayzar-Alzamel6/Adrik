@@ -1,9 +1,12 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Crypto from "expo-crypto";
+import * as SecureStore from "expo-secure-store";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { storeFor } from "@/lib/stores";
 import {
   SYNC_SLOTS,
+  isLanKey,
   refresh,
   remoteFor,
   startSession,
@@ -18,6 +21,23 @@ import {
 import { PERSONAL_SYNC_ENABLED } from "@/lib/sync/flag";
 
 export { PERSONAL_SYNC_ENABLED };
+
+// Sealing Wi-Fi sync needs secure random nonces; Hermes has no Web Crypto of its own.
+const g = globalThis as { crypto?: { getRandomValues?: unknown } };
+if (typeof g.crypto?.getRandomValues !== "function") {
+  g.crypto = { ...(g.crypto ?? {}), getRandomValues: Crypto.getRandomValues };
+}
+
+/**
+ * The Wi-Fi sync key lives in the Android keystore (SecureStore), never in AsyncStorage: the saved config keeps
+ * an empty key, and the real one is put back after loading.
+ */
+const LAN_KEY_ID = "adrik-lan-sync-key";
+const secure = {
+  get: () => SecureStore.getItemAsync(LAN_KEY_ID).catch(() => null),
+  set: (v: string) => SecureStore.setItemAsync(LAN_KEY_ID, v).catch(() => {}),
+  clear: () => SecureStore.deleteItemAsync(LAN_KEY_ID).catch(() => {}),
+};
 
 interface SyncState {
   config: SyncConfig | null;
@@ -68,26 +88,60 @@ export const useSyncStore = create<SyncState>()(
       connect: async (config, password) => {
         const session = await startSession(config, password);
         await forgetSyncState();
+        if (config.mode === "lan") await secure.set(config.key);
+        else await secure.clear();
         set({ config, session, lastError: null });
         await syncNow();
       },
       disconnect: async () => {
         await forgetSyncState();
+        await secure.clear();
         set({ config: null, session: null, lastSyncAt: null, lastError: null });
       },
     }),
     {
       name: "adrik-personal-sync-v1",
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: ({ config, session, lastSyncAt }) => ({ config, session, lastSyncAt }),
+      partialize: ({ config, session, lastSyncAt }) => ({
+        config: config?.mode === "lan" ? { ...config, key: "" } : config,
+        session,
+        lastSyncAt,
+      }),
+      onRehydrateStorage: () => (state) => {
+        if (state?.config?.mode === "lan") restoreLanKey(state.config.key);
+      },
     }
   )
 );
+
+/**
+ * Puts the Wi-Fi key back from SecureStore after loading. Without a valid key (a config saved by an older build
+ * still holds the plain password) the config is wiped, and the person connects again with the password.
+ */
+async function restoreLanKey(saved: string) {
+  const key = await secure.get();
+  const config = useSyncStore.getState().config;
+  if (!config || config.mode !== "lan") return;
+  if (key && isLanKey(key)) {
+    useSyncStore.setState({ config: { ...config, key } });
+    syncNow();
+    return;
+  }
+  await forgetSyncState();
+  useSyncStore.setState({
+    config: null,
+    session: null,
+    lastSyncAt: null,
+    lastError: saved ? "تحدّثت المزامنة وصارت مشفّرة. اربطها مرة أخرى بكلمة المزامنة." : "ضاع مفتاح المزامنة من الهاتف. اربطها مرة أخرى.",
+  });
+}
 
 /** One full pass. Concurrent calls collapse into the one already running. */
 export async function syncNow() {
   const { config, session, running } = useSyncStore.getState();
   if (!PERSONAL_SYNC_ENABLED || !config || !session || running) return;
+  // The Wi-Fi key is still being read back from SecureStore: a pass now would only count as a failed attempt.
+  if (config.mode === "lan" && !isLanKey(config.key)) return;
   useSyncStore.setState({ running: true });
   try {
     let fresh: Session;
