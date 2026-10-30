@@ -1,0 +1,36 @@
+{
+  "cli": {
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_PERSONAL_SYNC": "0"
+      }
+    },
+    "personal": {
+      "distribution": "internal",
+      "env": {
+        "APP_VARIANT": "personal",
+        "EXPO_PUBLIC_PERSONAL_SYNC": "1"
+      },
+      "android": {
+        "buildType": "apk"
+      },
+      "autoIncrement": true
+    },
+    "production": {
+      "autoIncrement": true,
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_PERSONAL_SYNC": "0"
+      }
+    }
+  }
+}
